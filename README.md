@@ -62,6 +62,20 @@ In a Flow policy for `AppTier: Web`, the outbound rule to the database is the on
 
 ## Install
 
+### 0. Prepare the VM with cloud-init (optional)
+
+[`deploy/cloud-init/portal-vm.yaml`](deploy/cloud-init/portal-vm.yaml) prepares a Rocky Linux 9 cloud image (GenericCloud qcow2) at first boot:
+
+- sets the host name, time zone and your SSH key
+- runs `dnf upgrade` and installs nginx, python3.11, python3.11-pip, openssl and tar, plus psql, nc, dig, jq, chrony, git, rsync and vim
+- disables SELinux (now, in `/etc/selinux/config`, and with the `selinux=0` kernel argument)
+- stops and masks firewalld
+- reboots once
+
+In Prism Central: **Create VM → Guest Customization → Cloud-init (Linux) → Custom Script**, and paste the file after editing the lines marked `EDIT` (host name, FQDN, SSH key). The VM needs dnf repository access during first boot. It is ready when `/var/lib/claims-desk/vm-ready` exists; first-boot output is in `/var/log/cloud-init-output.log`. With the packages already present, `install.sh` skips dnf, reports SELinux and firewalld as disabled, and needs no repository access.
+
+Optionally, set `BUNDLE_URL` in the file to an internal address that serves the offline bundle; the VM then extracts it to `/opt/claims-desk-bundle`. The GitHub release needs a token, so for GitHub copy the bundle with `scp` (step 1).
+
 ### 1. Get the bundle onto the VM
 
 The repository is private, so download from a machine that can sign in to GitHub, then copy to the VM.

@@ -24,6 +24,11 @@ jobs:
           python -m pytest -q -p no:cacheprovider tests
       - name: ShellCheck
         run: shellcheck -x install.sh uninstall.sh deploy/claims-desk scripts/*.sh
+      - name: cloud-init schema (Rocky Linux 9's cloud-init)
+        run: |
+          docker run --rm -v "$PWD/deploy/cloud-init:/ci:ro" rockylinux/rockylinux:9 bash -c \
+            "dnf -y -q install cloud-init >/dev/null && cloud-init --version && \
+             for f in /ci/*.yaml; do cloud-init schema --config-file \$f --annotate; done"
 
   e2e:
     needs: test
