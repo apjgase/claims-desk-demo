@@ -58,7 +58,7 @@ def make_pool(cfg: Dict[str, Any]) -> ConnectionPool:
 def server_info(conn: psycopg.Connection) -> Dict[str, Any]:
     row = conn.execute(
         "SELECT version() AS version, current_database() AS database, "
-        "current_user AS db_user, inet_server_addr()::text AS server_addr, "
+        "current_user AS db_user, host(inet_server_addr()) AS server_addr, "
         "inet_server_port() AS server_port, pg_is_in_recovery() AS in_recovery, "
         "now() AS server_time"
     ).fetchone()
