@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="cards">
+  {% for s in statuses %}
+    {% set v = stats.by_status[s] if stats else None %}
+    <a class="card {% if status == s %}active{% endif %}" href="/?status={{ s }}">
+      <span class="label">{{ s|replace('_', ' ') }}</span>
+      <span class="num">{{ v.count if v else '–' }}</span>
+      <span class="sub">{{ v.amount|money if v else '' }}</span>
+    </a>
+  {% endfor %}
+</section>
+
+<form class="filter" method="get" action="/">
+  <input type="search" name="q" value="{{ q }}" placeholder="Claim, policy or claimant">
+  <select name="status">
+    <option value="">All statuses</option>
+    {% for s in statuses %}<option value="{{ s }}" {% if status == s %}selected{% endif %}>{{ s|replace('_', ' ') }}</option>{% endfor %}
+  </select>
+  <button type="submit">Filter</button>
+  {% if q or status %}<a href="/">Clear</a>{% endif %}
+  <span class="count">{% if stats %}{{ claims|length }} shown · {{ stats.total }} total{% endif %}</span>
+</form>
+
+<table class="claims">
+  <thead>
+    <tr><th>Claim</th><th>Claimant</th><th>Policy</th><th>Type</th><th class="r">Amount</th>
+        <th>Status</th><th>Submitted</th><th>Written by</th></tr>
+  </thead>
+  <tbody>
+  {% for c in claims %}
+    <tr>
+      <td><a class="mono" href="/claims/{{ c.claim_number }}">{{ c.claim_number }}</a></td>
+      <td>{{ c.claimant_name }}</td>
+      <td class="mono">{{ c.policy_number }}</td>
+      <td>{{ c.loss_type }}</td>
+      <td class="r mono">{{ c.amount|money }}</td>
+      <td><span class="status s-{{ c.status|lower }}">{{ c.status|replace('_', ' ') }}</span></td>
+      <td class="mono">{{ c.created_at|when }}</td>
+      <td class="mono dim">{{ c.created_by_host }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="8" class="empty">
+      {% if error %}No data: the request did not reach the database.{% else %}No claims yet. <a href="/claims/new">Submit the first one.</a>{% endif %}
+    </td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

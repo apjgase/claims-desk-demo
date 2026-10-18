@@ -1,0 +1,53 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Unit and integration tests (throwaway PostgreSQL)
+        run: |
+          pip install -q -r app/requirements.txt -c app/constraints.txt pytest pgserver
+          python -m pytest -q -p no:cacheprovider tests
+      - name: ShellCheck
+        run: shellcheck -x install.sh uninstall.sh deploy/claims-desk scripts/*.sh
+
+  e2e:
+    needs: test
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the offline bundle
+        run: bash scripts/build-bundle.sh
+      - name: install.sh on Rocky Linux 9 + PostgreSQL 16 (from the repository, online)
+        run: bash scripts/e2e-rocky9.sh
+      - name: install.sh on Rocky Linux 9 + PostgreSQL 16 (from the offline bundle)
+        run: |
+          mkdir -p /tmp/bundle
+          tar -xzf dist/claims-desk-demo-*.tar.gz -C /tmp/bundle
+          bash scripts/e2e-rocky9.sh /tmp/bundle/claims-desk-demo-*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: offline-bundle
+          path: dist/
+      - name: Attach the bundle to the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 \
+            || gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file docs/RELEASE_NOTES.md
+          gh release upload "$GITHUB_REF_NAME" dist/*.tar.gz dist/*.sha256 --clobber

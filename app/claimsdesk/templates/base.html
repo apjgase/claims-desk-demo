@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}{{ site_name }}{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="/"><span class="mark">CD</span>{{ site_name }}</a>
+  <nav>
+    <a href="/">Claims</a>
+    <a href="/claims/new" class="cta">New claim</a>
+    <a href="/about">Architecture</a>
+  </nav>
+  <span class="env env-{{ environment|lower }}">{{ environment }}</span>
+</header>
+
+<main>
+  {% if error %}<div class="banner error">{{ error }}</div>{% endif %}
+  {% block content %}{% endblock %}
+</main>
+
+<footer>
+  <span class="tier"><b>WEB</b> {{ web.hostname }} · {{ web.ip }}</span>
+  {% if info %}
+    <span class="tier"><b>API</b> {{ info.host.hostname }} · {{ info.host.ip }}</span>
+    {% if info.db and info.db.status == 'ok' %}
+      <span class="tier"><b>DB</b> {{ info.db.server_addr or info.db_endpoint.host }}:{{ info.db.server_port or info.db_endpoint.port }}
+        · {{ 'replica' if info.db.in_recovery else 'primary' }}</span>
+    {% else %}
+      <span class="tier down"><b>DB</b> {{ info.db_endpoint.host }}:{{ info.db_endpoint.port }} · unavailable</span>
+    {% endif %}
+  {% else %}
+    <span class="tier down"><b>API</b> {{ api_url }} · unreachable</span>
+  {% endif %}
+  <span class="ver">{{ stage }} · v{{ version }}</span>
+</footer>
+</body>
+</html>

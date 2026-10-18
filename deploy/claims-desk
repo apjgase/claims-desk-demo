@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# Day-2 helper for the Claims Desk portal VM. Installed to /usr/local/bin/claims-desk.
+set -euo pipefail
+
+PREFIX=/opt/claims-desk
+admin() {
+  CLAIMS_CONFIG=/etc/claims-desk/api.json PYTHONPATH="$PREFIX/app" \
+    "$PREFIX/venv/bin/python" -m claimsdesk.admin "$@"
+}
+
+usage() {
+  cat <<'EOF'
+Usage: claims-desk <command>
+
+  status         services and the end-to-end health check
+  check          log in to PostgreSQL as the app user; show which node answered
+  info           database server details and claim counts (JSON)
+  seed [N]       add N sample claims (default 12)
+  reset          delete every claim and restart numbering (asks first)
+  restart        restart claims-api, claims-web and nginx
+  logs [N]       last N log lines of all three services (default 100)
+EOF
+}
+
+[ "$(id -u)" -eq 0 ] || { echo "run as root: sudo claims-desk $*" >&2; exit 1; }
+
+case "${1:-}" in
+  status)
+    for svc in nginx claims-web claims-api; do
+      printf '%-12s %s\n' "$svc" "$(systemctl is-active "$svc" || true)"
+    done
+    printf '%-12s ' "health"
+    curl -sk --max-time 10 https://127.0.0.1/healthz || echo "no response"
+    echo
+    ;;
+  check) admin check ;;
+  info) admin info ;;
+  seed) admin seed "${2:-12}" ;;
+  reset)
+    read -r -p "Delete ALL claims? Type yes: " answer
+    if [ "$answer" = "yes" ]; then admin reset; else echo "cancelled"; fi
+    ;;
+  restart) systemctl restart claims-api claims-web nginx && echo "restarted" ;;
+  logs) journalctl -u claims-api -u claims-web -u nginx -n "${2:-100}" --no-pager ;;
+  -h|--help|help|"") usage ;;
+  *) usage; exit 1 ;;
+esac

@@ -1,0 +1,21 @@
+[Unit]
+Description=Claims Desk web tier
+After=network-online.target claims-api.service
+Wants=network-online.target
+
+[Service]
+User=claimsdesk
+Group=claimsdesk
+Environment=CLAIMS_CONFIG=/etc/claims-desk/web.json
+Environment=PYTHONDONTWRITEBYTECODE=1
+WorkingDirectory=/opt/claims-desk/app
+ExecStart=/opt/claims-desk/venv/bin/uvicorn claimsdesk.web:app --host 127.0.0.1 --port 8080 --workers 2 --no-server-header --proxy-headers --forwarded-allow-ips 127.0.0.1
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

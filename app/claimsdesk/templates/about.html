@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Architecture · {{ site_name }}{% endblock %}
+{% block content %}
+<h1>Request path</h1>
+<p class="lead">{{ stage }}. Every page you see took this path. The values are read live from each tier.</p>
+
+<div class="path">
+  <div class="hop">
+    <span class="badge b-vm">CLIENT</span>
+    <b>Adjuster browser</b>
+    <code>HTTPS 443</code>
+  </div>
+  <div class="arrow">→</div>
+  <div class="hop">
+    <span class="badge b-vm">VM</span>
+    <b>nginx + web tier</b>
+    <code>{{ web.hostname }}</code>
+    <code>{{ web.ip }} · :8080</code>
+  </div>
+  <div class="arrow">→</div>
+  <div class="hop {% if not info %}down{% endif %}">
+    <span class="badge b-vm">{{ 'VM' if info and info.host.hostname == web.hostname else 'API' }}</span>
+    <b>Middleware API</b>
+    <code>{{ api_url }}</code>
+    {% if info %}<code>{{ info.host.hostname }} · {{ info.host.ip }}</code>{% else %}<code>unreachable</code>{% endif %}
+  </div>
+  <div class="arrow">→</div>
+  <div class="hop {% if not (info and info.db and info.db.status == 'ok') %}down{% endif %}">
+    <span class="badge b-db">DB</span>
+    <b>PostgreSQL</b>
+    {% if info %}
+      <code>{{ info.db_endpoint.host }}:{{ info.db_endpoint.port }}</code>
+      {% if info.db.status == 'ok' %}
+        <code>served by {{ info.db.server_addr or 'local socket' }} · {{ 'replica' if info.db.in_recovery else 'primary' }}</code>
+      {% else %}
+        <code>unavailable</code>
+      {% endif %}
+    {% else %}<code>unknown</code>{% endif %}
+  </div>
+</div>
+
+{% if info and info.db.status == 'ok' %}
+<dl class="details">
+  <dt>Database</dt><dd class="mono">{{ info.db.database }} · schema {{ info.db_endpoint.schema }} · user {{ info.db.db_user }}</dd>
+  <dt>Server</dt><dd class="mono">{{ info.db.version }}</dd>
+  <dt>Server time</dt><dd class="mono">{{ info.db.server_time }}</dd>
+</dl>
+{% elif info %}
+<div class="banner error">{{ info.db.error }}</div>
+{% endif %}
+
+<h2>What to look for</h2>
+<ul class="notes">
+  <li><b>Written by</b> on each claim records the host that inserted it. After a DR failover to NC2 the portal keeps its name; the address in the footer shows where it now runs.</li>
+  <li><b>DB served by</b> is <code>inet_server_addr()</code>: the PostgreSQL node that answered. Behind HAProxy (stage 2) it changes when Patroni promotes a new primary.</li>
+  <li>The web tier never opens a database connection. Only the middleware does, so moving the middleware into pods later is a configuration change.</li>
+</ul>
+{% endblock %}

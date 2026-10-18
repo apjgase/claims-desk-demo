@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}New claim · {{ site_name }}{% endblock %}
+{% block content %}
+<h1>Submit a claim</h1>
+<form class="claim-form" method="post" action="/claims/new">
+  <label>Policy number
+    <input name="policy_number" value="{{ form.policy_number or '' }}" required minlength="3" maxlength="32" placeholder="POL-48213">
+    {% if errors.policy_number %}<em>{{ errors.policy_number }}</em>{% endif %}
+  </label>
+  <label>Claimant name
+    <input name="claimant_name" value="{{ form.claimant_name or '' }}" required maxlength="120">
+    {% if errors.claimant_name %}<em>{{ errors.claimant_name }}</em>{% endif %}
+  </label>
+  <label>Contact email
+    <input name="contact_email" type="email" value="{{ form.contact_email or '' }}" maxlength="200">
+    {% if errors.contact_email %}<em>{{ errors.contact_email }}</em>{% endif %}
+  </label>
+  <label>Date of loss
+    <input name="loss_date" type="date" value="{{ form.loss_date or '' }}" required>
+    {% if errors.loss_date %}<em>{{ errors.loss_date }}</em>{% endif %}
+  </label>
+  <label>Loss type
+    <select name="loss_type" required>
+      {% for t in loss_types %}<option {% if form.loss_type == t %}selected{% endif %}>{{ t }}</option>{% endfor %}
+    </select>
+    {% if errors.loss_type %}<em>{{ errors.loss_type }}</em>{% endif %}
+  </label>
+  <label>Amount claimed
+    <input name="amount" type="number" min="0" step="0.01" value="{{ form.amount or '' }}" required>
+    {% if errors.amount %}<em>{{ errors.amount }}</em>{% endif %}
+  </label>
+  <label class="wide">What happened
+    <textarea name="description" rows="5" required maxlength="4000">{{ form.description or '' }}</textarea>
+    {% if errors.description %}<em>{{ errors.description }}</em>{% endif %}
+  </label>
+  <label>Adjuster
+    <input name="adjuster" value="{{ form.adjuster or '' }}" maxlength="120">
+  </label>
+  <label class="muted">Photo
+    <input type="file" disabled>
+    <small>Stored on Nutanix Files from stage 3.</small>
+  </label>
+  <div class="wide actions">
+    <button type="submit">Submit claim</button>
+    <a href="/">Cancel</a>
+  </div>
+</form>
+{% endblock %}

@@ -1,0 +1,30 @@
+# Unattended install: cp claims-desk.conf.example claims-desk.conf, fill it in, then
+#   sudo ./install.sh --config claims-desk.conf
+# Shell syntax. Put passwords in single quotes. Delete this file after the install:
+# the application password is kept in /etc/claims-desk/api.json (mode 0640).
+
+# PostgreSQL endpoint. Single instance: the database VM, port 5432.
+# NDB PostgreSQL HA: the HAProxy address, port 5000 (read/write).
+DB_HOST=''
+DB_PORT=5432
+
+# Admin account used once, to create the app role and database (NDB: the
+# database password you set at provisioning, user postgres). Leave DB_ADMIN_USER
+# empty if the app role and database already exist; then DB_APP_PASSWORD is required.
+DB_ADMIN_USER='postgres'
+DB_ADMIN_PASSWORD=''
+DB_ADMIN_DB='postgres'
+
+# Application database and role. Created if missing. Empty password = generated.
+DB_NAME='claims'
+DB_APP_USER='claims_app'
+DB_APP_PASSWORD=''
+DB_SSLMODE='prefer'
+
+# Portal
+SERVER_NAME=''           # TLS name; empty = this VM's FQDN
+TLS_CERT=''              # optional PEM certificate; empty = self-signed
+TLS_KEY=''               # optional PEM private key
+SITE_NAME='Claims Desk'
+ENVIRONMENT='Prod'       # shown in the header: Prod or UAT
+SEED_COUNT=12            # sample claims loaded into an empty table; 0 = none

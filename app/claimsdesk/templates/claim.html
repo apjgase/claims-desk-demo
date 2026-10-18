@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}{{ claim.claim_number if claim else 'Claim' }} · {{ site_name }}{% endblock %}
+{% block content %}
+{% if claim %}
+  {% if created %}<div class="banner ok">Claim {{ claim.claim_number }} submitted and committed to PostgreSQL.</div>{% endif %}
+  <div class="claim-head">
+    <h1 class="mono">{{ claim.claim_number }}</h1>
+    <span class="status big s-{{ claim.status|lower }}">{{ claim.status|replace('_', ' ') }}</span>
+  </div>
+
+  <dl class="details">
+    <dt>Claimant</dt><dd>{{ claim.claimant_name }}{% if claim.contact_email %} · {{ claim.contact_email }}{% endif %}</dd>
+    <dt>Policy</dt><dd class="mono">{{ claim.policy_number }}</dd>
+    <dt>Loss</dt><dd>{{ claim.loss_type }} on {{ claim.loss_date }}</dd>
+    <dt>Amount</dt><dd class="mono">{{ claim.amount|money }}</dd>
+    <dt>Adjuster</dt><dd>{{ claim.adjuster or '—' }}</dd>
+    <dt>Description</dt><dd class="pre">{{ claim.description }}</dd>
+    <dt>Photo</dt><dd class="dim">{{ claim.photo_path or 'none (Nutanix Files, stage 3)' }}</dd>
+    <dt>Packet</dt><dd class="dim">{{ claim.packet_url or 'none (Objects WORM, stage 3)' }}</dd>
+    <dt>Written by</dt><dd class="mono">{{ claim.created_by_host }}</dd>
+    <dt>Submitted</dt><dd class="mono">{{ claim.created_at|when }}</dd>
+    <dt>Updated</dt><dd class="mono">{{ claim.updated_at|when }}</dd>
+  </dl>
+
+  <form class="status-form" method="post" action="/claims/{{ claim.claim_number }}/status">
+    <span>Move to</span>
+    {% for s in statuses if s != claim.status %}
+      <button name="status" value="{{ s }}" class="status s-{{ s|lower }}">{{ s|replace('_', ' ') }}</button>
+    {% endfor %}
+  </form>
+{% endif %}
+<p><a href="/">← All claims</a></p>
+{% endblock %}
