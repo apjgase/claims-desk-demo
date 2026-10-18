@@ -177,9 +177,10 @@ fi
 
 # ---------------------------------------------------------------- packages
 step "Packages"
-PKGS=(nginx "$PY" "${PY}-pip" openssl tar curl)
 MISSING=()
-for p in "${PKGS[@]}"; do rpm -q "$p" >/dev/null 2>&1 || MISSING+=("$p"); done
+for p in nginx "$PY" "${PY}-pip"; do rpm -q "$p" >/dev/null 2>&1 || MISSING+=("$p"); done
+# By command, not package: Rocky ships curl-minimal, which conflicts with the curl package.
+for c in openssl tar curl; do command -v "$c" >/dev/null 2>&1 || MISSING+=("$c"); done
 if [ ${#MISSING[@]} -gt 0 ]; then
   info "installing ${MISSING[*]}"
   dnf -y -q install "${MISSING[@]}" \
