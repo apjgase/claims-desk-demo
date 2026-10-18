@@ -264,7 +264,7 @@ else
   chmod 0600 "$KEY"
   info "self-signed certificate for ${SAN}"
 fi
-command -v restorecon >/dev/null && restorecon -q "$CERT" "$KEY" || true
+if command -v restorecon >/dev/null; then restorecon -q "$CERT" "$KEY" || true; fi
 
 # ---------------------------------------------------------------- nginx
 step "nginx"

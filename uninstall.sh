@@ -30,8 +30,8 @@ fi
 
 rm -rf "$PREFIX" "$ETC" /usr/local/bin/claims-desk
 rm -f /etc/pki/tls/certs/claims-desk.crt /etc/pki/tls/private/claims-desk.key
-getent passwd claimsdesk >/dev/null && userdel claimsdesk || true
-getent group claimsdesk >/dev/null && groupdel claimsdesk 2>/dev/null || true
+if getent passwd claimsdesk >/dev/null; then userdel claimsdesk || true; fi
+if getent group claimsdesk >/dev/null; then groupdel claimsdesk 2>/dev/null || true; fi
 
 echo "Claims Desk removed. nginx, python3.11 and the firewall rules were left in place."
 if [ -n "$DB_LINE" ]; then
