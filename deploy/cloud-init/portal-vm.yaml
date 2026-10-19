@@ -72,7 +72,7 @@ chpasswd:
   expire: false
   users:
     - name: root
-      password: "$6$whTT6hc2ODon5KWm$Yh5tPeCHOO9dkLe1uZRJQrd6s3aeo12xCq5/fKAuTGUx2uKTROrgUiYz2bW.iC5OhYAIftH0GHNT0Yjsc/tON/"
+      password: "$6$w/K1REnMsGO1qqc/$kd9P7P.wpEhKGjFrh/o/nGSiZg8NbYDSCLq.Q0NeJvTlwPEHzcHETdMwABQVPYVufA3HVLA68vobrrRTvRf2N/"
       type: hash
 
 package_update: true
