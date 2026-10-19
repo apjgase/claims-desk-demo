@@ -31,7 +31,7 @@ chpasswd:
   users:
     - name: root
       password: "$6$whTT6hc2ODon5KWm$Yh5tPeCHOO9dkLe1uZRJQrd6s3aeo12xCq5/fKAuTGUx2uKTROrgUiYz2bW.iC5OhYAIftH0GHNT0Yjsc/tON/"
-      type: HASH
+      type: hash
 
 package_update: true
 package_upgrade: true
