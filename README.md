@@ -66,7 +66,8 @@ In a Flow policy for `AppTier: Web`, the outbound rule to the database is the on
 
 [`deploy/cloud-init/portal-vm.yaml`](deploy/cloud-init/portal-vm.yaml) prepares a Rocky Linux 9 cloud image (GenericCloud qcow2) at first boot:
 
-- sets the host name, time zone and your SSH key
+- sets the host name and time zone, and installs the lab SSH key for `rocky` and `root`
+- sets the root password (lab default, stored as a SHA-512 hash) and allows SSH password logins, root included
 - runs `dnf upgrade` and installs nginx, python3.11, python3.11-pip, openssl and tar, plus psql, nc, dig, jq, chrony, git, rsync and vim
 - disables SELinux (now, in `/etc/selinux/config`, and with the `selinux=0` kernel argument)
 - stops and masks firewalld

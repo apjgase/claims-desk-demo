@@ -15,18 +15,23 @@ prefer_fqdn_over_hostname: true
 manage_etc_hosts: true
 timezone: Australia/Sydney                  # EDIT if needed
 
-# The image's default user (rocky on Rocky Linux, cloud-user on RHEL) gets this key and sudo.
+# SSH: the lab key works for the default user (rocky on Rocky Linux, cloud-user on RHEL)
+# and for root. Password logins are on, root included. Lab only.
 # Lab key: deploy/ssh/claims-desk-lab.pub (private key on the admin laptop only).
 users:
   - default
 ssh_authorized_keys:
   - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGfO43mMt4kOUNA2UA2fykY4gWVU3WyXK9WY+cw8WGIa claims-desk-lab (maksim.malygin@nutanix.com)
-ssh_pwauth: false
-# Console password for the default user (optional; hash with: openssl passwd -6):
-# chpasswd:
-#   expire: false
-#   users:
-#     - {name: rocky, password: "$6$...", type: HASH}
+disable_root: false
+ssh_pwauth: true
+
+# Root password, SHA-512 crypt. New hash: openssl passwd -6 (on Linux)
+chpasswd:
+  expire: false
+  users:
+    - name: root
+      password: "$6$whTT6hc2ODon5KWm$Yh5tPeCHOO9dkLe1uZRJQrd6s3aeo12xCq5/fKAuTGUx2uKTROrgUiYz2bW.iC5OhYAIftH0GHNT0Yjsc/tON/"
+      type: HASH
 
 package_update: true
 package_upgrade: true
@@ -48,6 +53,13 @@ packages:
   - vim-enhanced
 
 write_files:
+  # sshd reads drop-ins in name order and keeps the first value, so 01- overrides the
+  # image's prohibit-password default for root.
+  - path: /etc/ssh/sshd_config.d/01-claims-desk-lab.conf
+    permissions: "0600"
+    content: |
+      PermitRootLogin yes
+      PasswordAuthentication yes
   - path: /etc/profile.d/claims-desk.sh
     permissions: "0644"
     content: |
@@ -81,6 +93,7 @@ runcmd:
   - [sh, -c, "systemctl disable --now firewalld 2>/dev/null || true"]
   - [systemctl, mask, firewalld]
   - [systemctl, enable, --now, chronyd]
+  - [sh, -c, "sshd -t && systemctl restart sshd"]
   - [/usr/local/sbin/claims-desk-fetch-bundle]
   - [mkdir, -p, /var/lib/claims-desk]
   - [sh, -c, "date -Is > /var/lib/claims-desk/vm-ready"]
