@@ -8,7 +8,7 @@
 # Installs nginx (HTTPS 443, HTTP 80 redirects), the web tier (127.0.0.1:8080) and the
 # middleware API (127.0.0.1:8000) as systemd services, creates the application role,
 # database and claims table on the PostgreSQL you provisioned, loads sample claims,
-# and runs an end-to-end check. Safe to re-run: it upgrades the code and keeps the data.
+# registers this VM in Windows DNS, and runs an end-to-end check. Safe to re-run.
 set -euo pipefail
 umask 022
 
@@ -20,6 +20,8 @@ PY=python3.11
 CERT=/etc/pki/tls/certs/claims-desk.crt
 KEY=/etc/pki/tls/private/claims-desk.key
 LOG=/var/log/claims-desk-install.log
+DNS_SERVER="${DNS_SERVER:-10.55.19.6}"
+DNS_ZONE="${DNS_ZONE:-ntnxlab.local}"
 
 CONFIG=""
 RECONFIGURE=0
@@ -88,6 +90,57 @@ ask_yes() {
 }
 
 valid_ident() { [[ "$1" =~ ^[a-z_][a-z0-9_]{0,62}$ ]]; }
+
+valid_ipv4() {
+  local ip="$1" oct
+  [[ "$ip" =~ ^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})$ ]] || return 1
+  for oct in "${BASH_REMATCH[@]:1}"; do
+    [ "$((10#$oct))" -le 255 ] || return 1
+  done
+}
+
+# Address this VM uses to reach Windows DNS. Falls back to the first address.
+local_ipv4() {
+  local ip=""
+  ip="$(ip -4 route get "$DNS_SERVER" 2>/dev/null | awk '{for (i=1; i<=NF; i++) if ($i=="src") {print $(i+1); exit}}' || true)"
+  if ! valid_ipv4 "$ip"; then
+    ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
+  fi
+  printf '%s' "$ip"
+}
+
+# Publish an A record. A server that does not answer on TCP 53 is skipped, so a
+# lab without that DNS server still installs. A refusal is a hard error.
+dns_upsert() {
+  local fqdn="$1" ip="$2"
+  [[ "$fqdn" =~ ^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$ ]] \
+    || die "DNS name '$fqdn' is not a valid host name"
+  valid_ipv4 "$ip" || die "DNS update needs an IPv4 address for ${fqdn}, got '${ip}'"
+  valid_ipv4 "$DNS_SERVER" || die "DNS_SERVER '${DNS_SERVER}' must be an IPv4 address"
+  [[ "$DNS_ZONE" =~ ^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$ ]] \
+    || die "DNS_ZONE '${DNS_ZONE}' is not a valid domain"
+  command -v nsupdate >/dev/null 2>&1 || die "nsupdate is missing. Install bind-utils."
+  if ! timeout 5 bash -c "echo >/dev/tcp/${DNS_SERVER}/53" 2>/dev/null; then
+    warn "DNS server ${DNS_SERVER} is not accepting TCP 53. Left ${fqdn} unchanged."
+    return 0
+  fi
+  info "DNS ${fqdn} -> ${ip} on ${DNS_SERVER}"
+  if ! nsupdate -v <<EOF
+server ${DNS_SERVER}
+zone ${DNS_ZONE}
+update delete ${fqdn}. A
+update add ${fqdn}. 300 A ${ip}
+send
+EOF
+  then
+    die "DNS update for ${fqdn} was refused by ${DNS_SERVER}. Set the ${DNS_ZONE} zone to Nonsecure and secure dynamic updates."
+  fi
+  local answers=""
+  answers="$(dig +short "$fqdn" @"$DNS_SERVER" A || true)"
+  printf '%s\n' "$answers" | grep -x "$ip" >/dev/null \
+    || die "DNS server ${DNS_SERVER} did not return ${ip} for ${fqdn}"
+  DNS_PUBLISHED="$fqdn"
+}
 
 admin_cli() {
   PYTHONPATH="$PREFIX/app" "$PREFIX/venv/bin/python" -m claimsdesk.admin "$@"
@@ -182,6 +235,7 @@ MISSING=()
 for p in nginx "$PY" "${PY}-pip"; do rpm -q "$p" >/dev/null 2>&1 || MISSING+=("$p"); done
 # By command, not package: Rocky ships curl-minimal, which conflicts with the curl package.
 for c in openssl tar curl; do command -v "$c" >/dev/null 2>&1 || MISSING+=("$c"); done
+command -v nsupdate >/dev/null 2>&1 || MISSING+=("bind-utils")
 if [ ${#MISSING[@]} -gt 0 ]; then
   info "installing ${MISSING[*]}"
   dnf -y -q install "${MISSING[@]}" \
@@ -325,6 +379,16 @@ else
   exit 1
 fi
 
+step "DNS"
+SHORT="$(hostname -s 2>/dev/null | tr '[:upper:]' '[:lower:]' || true)"
+IP="$(local_ipv4)"
+DNS_PUBLISHED=""
+if [[ "$SHORT" =~ ^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$ ]]; then
+  dns_upsert "${SHORT}.${DNS_ZONE}" "$IP"
+else
+  warn "host name '${SHORT}' is not a DNS label. Skipped the A record."
+fi
+
 if [ "${CLAIMS_UPDATE_FOLLOW:-}" = "1" ]; then
   info "portal tier is in place"
   if [ "${GENERATED_PW:-0}" -eq 1 ]; then
@@ -333,7 +397,6 @@ if [ "${CLAIMS_UPDATE_FOLLOW:-}" = "1" ]; then
   exit 0
 fi
 
-IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
 cat <<EOF
 
 $(printf '\033[1;32m')Claims Desk stage 1 is running.$(printf '\033[0m')
@@ -341,6 +404,7 @@ $(printf '\033[1;32m')Claims Desk stage 1 is running.$(printf '\033[0m')
   Portal        https://${SERVER_NAME}/   (or https://${IP}/)
   Architecture  https://${SERVER_NAME}/about
   API           https://${SERVER_NAME}/api/v1/claims   docs: /api/docs
+  DNS           ${DNS_PUBLISHED:-not updated} on ${DNS_SERVER}
   Helper        sudo claims-desk status | check | info | seed N | reset | logs
   Settings      ${ETC}/api.json (database), ${ETC}/web.json (web tier)
 EOF

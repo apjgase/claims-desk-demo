@@ -11,13 +11,13 @@
 # Done when the VM has rebooted and /var/lib/claims-desk/vm-ready exists.
 
 hostname: docvm                             # EDIT
-fqdn: docvm.claims.internal                 # EDIT
+fqdn: docvm.ntnxlab.local                   # EDIT
 prefer_fqdn_over_hostname: true
 manage_etc_hosts: true
 timezone: Australia/Sydney                  # EDIT if needed
 
-# DNS comes from the subnet: set lab01 as the DNS server and claims.internal as the search
-# domain in the IPAM settings of the VPC subnet. Time comes from lab01.
+# DNS is the Windows Server at 10.55.19.6, search domain ntnxlab.local. It is pinned in
+# the guest so subnet DHCP cannot replace it. Time comes from lab01.
 ntp:
   enabled: true
   ntp_client: chrony
@@ -107,8 +107,16 @@ write_files:
     content: |
       # Claims Desk document VM. The portal installs claims-docs over SSH.
       alias doclog='sudo journalctl -u claims-docs -f'
+  # NetworkManager must not rewrite resolv.conf from DHCP.
+  - path: /etc/NetworkManager/conf.d/90-ntnxlab-dns.conf
+    permissions: "0644"
+    content: |
+      [main]
+      dns=none
 
 runcmd:
+  # Replace the NetworkManager symlink with a file. dns=none keeps DHCP from putting it back.
+  - [sh, -c, "rm -f /etc/resolv.conf; printf 'search ntnxlab.local\\nnameserver 10.55.19.6\\n' > /etc/resolv.conf; systemctl reload NetworkManager || true"]
   # SELinux: off now, and off after the reboot. On RHEL 9 the config file alone leaves
   # SELinux loaded without a policy; the selinux=0 kernel argument disables it fully.
   - [sh, -c, "setenforce 0 || true"]

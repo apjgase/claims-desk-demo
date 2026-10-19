@@ -6,10 +6,10 @@
 #   sudo ./update.sh --stage 3 --config claims-desk.conf -y
 #
 # Stage 3 runs on the portal VM. It asks for the document VM, the NFSv3 export
-# (IP:/path), and the Objects endpoint and keys, then logs into the document VM
-# and installs the document service there. The running portal process does not
-# keep the Objects keys. A root-only copy is saved on the portal so the next
-# ./update.sh --stage 3 can upgrade the document VM without asking again.
+# (host:/path), and the Objects endpoint and keys, then logs into the document VM
+# and installs the document service there. It registers both VMs in Windows DNS.
+# The running portal process does not keep the Objects keys. A root-only copy is
+# saved on the portal so the next ./update.sh --stage 3 can upgrade without asking.
 set -euo pipefail
 umask 022
 
@@ -39,6 +39,8 @@ S3_BUCKET="${S3_BUCKET:-claims}"
 S3_ACCESS_KEY="${S3_ACCESS_KEY:-}"
 S3_SECRET_KEY="${S3_SECRET_KEY:-}"
 S3_REGION="${S3_REGION:-us-east-1}"
+DNS_SERVER="${DNS_SERVER:-10.55.19.6}"
+DNS_ZONE="${DNS_ZONE:-ntnxlab.local}"
 
 usage() {
   sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
@@ -94,6 +96,14 @@ ask_secret() {
   printf -v "$var" '%s' "$reply"
 }
 
+# Same as ask_secret, but the console echoes each character. Used for the Objects keys.
+ask_echo() {
+  local var="$1" prompt="$2" reply
+  if [ -n "${!1:-}" ] || [ "$INTERACTIVE" -eq 0 ]; then return 0; fi
+  read -r -p "   $prompt: " reply
+  printf -v "$var" '%s' "$reply"
+}
+
 ask_yes() {
   local prompt="$1" def="${2:-Y}" reply
   [ "$INTERACTIVE" -eq 1 ] || { [ "$def" = "Y" ]; return; }
@@ -111,12 +121,78 @@ valid_ipv4() {
   done
 }
 
-norm_nfs() {
+valid_nfs_host() {
+  local host="$1"
+  # A dotted quad is an address, not a hostname, so 999.1.1.1 is rejected.
+  if [[ "$host" =~ ^[0-9]+(\.[0-9]+){3}$ ]]; then
+    if valid_ipv4 "$host"; then
+      return 0
+    fi
+    return 1
+  fi
+  [[ "$host" =~ ^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$ ]]
+}
+
+valid_nfs_export() {
   local spec="$1" host path
+  [[ "$spec" == *:* ]] || return 1
   host="${spec%%:*}"
   path="${spec#*:}"
-  path="${path%/}"
-  printf '%s:%s' "$host" "$path"
+  valid_nfs_host "$host" || return 1
+  [[ "$path" == /* && "$path" != *" "* && "$path" != *..* ]]
+}
+
+# Hostname and the address it resolves to count as the same export.
+nfs_host_key() {
+  local host="" resolved=""
+  host="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+  if valid_ipv4 "$host"; then
+    printf '%s' "$host"
+    return 0
+  fi
+  resolved="$(getent ahostsv4 "$host" 2>/dev/null | awk 'NR==1 {print $1}' || true)"
+  printf '%s' "${resolved:-$host}"
+}
+
+nfs_same() {
+  local a="$1" b="$2" ah ap bh bp
+  [ -n "$a" ] && [ -n "$b" ] || return 1
+  ah="${a%%:*}"; ap="${a#*:}"; ap="${ap%/}"
+  bh="${b%%:*}"; bp="${b#*:}"; bp="${bp%/}"
+  [ "$ap" = "$bp" ] || return 1
+  [ "$(nfs_host_key "$ah")" = "$(nfs_host_key "$bh")" ]
+}
+
+# Publish an A record. A server that does not answer on TCP 53 is skipped.
+# A refusal is a hard error: the zone is still secure-only.
+dns_upsert() {
+  local fqdn="$1" ip="$2"
+  [[ "$fqdn" =~ ^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$ ]] \
+    || die "DNS name '$fqdn' is not a valid host name"
+  valid_ipv4 "$ip" || die "DNS update needs an IPv4 address for ${fqdn}, got '${ip}'"
+  valid_ipv4 "$DNS_SERVER" || die "DNS_SERVER '${DNS_SERVER}' must be an IPv4 address"
+  [[ "$DNS_ZONE" =~ ^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$ ]] \
+    || die "DNS_ZONE '${DNS_ZONE}' is not a valid domain"
+  command -v nsupdate >/dev/null 2>&1 || die "nsupdate is missing. Install bind-utils."
+  if ! timeout 5 bash -c "echo >/dev/tcp/${DNS_SERVER}/53" 2>/dev/null; then
+    warn "DNS server ${DNS_SERVER} is not accepting TCP 53. Left ${fqdn} unchanged."
+    return 0
+  fi
+  info "DNS ${fqdn} -> ${ip} on ${DNS_SERVER}"
+  if ! nsupdate -v <<EOF
+server ${DNS_SERVER}
+zone ${DNS_ZONE}
+update delete ${fqdn}. A
+update add ${fqdn}. 300 A ${ip}
+send
+EOF
+  then
+    die "DNS update for ${fqdn} was refused by ${DNS_SERVER}. Set the ${DNS_ZONE} zone to Nonsecure and secure dynamic updates."
+  fi
+  local answers=""
+  answers="$(dig +short "$fqdn" @"$DNS_SERVER" A || true)"
+  printf '%s\n' "$answers" | grep -x "$ip" >/dev/null \
+    || die "DNS server ${DNS_SERVER} did not return ${ip} for ${fqdn}"
 }
 
 ssh_run() {
@@ -185,6 +261,8 @@ apply_documents() {
   info "${PRETTY_NAME}, host $(hostname -f 2>/dev/null || hostname)"
 
   [ -n "$NFS_EXPORT" ] || die "NFS_EXPORT is required"
+  valid_nfs_export "$NFS_EXPORT" \
+    || die "NFS_EXPORT must look like labFS.ntnxlab.local:/documents or 10.10.140.11:/claims-docs"
   [ -n "$S3_ENDPOINT" ] || die "S3_ENDPOINT is required"
   [ -n "$S3_BUCKET" ] || die "S3_BUCKET is required"
   [ -n "$S3_ACCESS_KEY" ] || die "S3_ACCESS_KEY is required"
@@ -213,18 +291,23 @@ apply_documents() {
 
   step "NFS"
   info "NFSv3 ${NFS_EXPORT} -> ${NFS_MOUNT}"
+  local nfs_host="${NFS_EXPORT%%:*}"
+  if ! valid_ipv4 "$nfs_host"; then
+    getent ahostsv4 "$nfs_host" >/dev/null \
+      || die "cannot resolve ${nfs_host} from this VM. Check /etc/resolv.conf."
+  fi
   mkdir -p "$NFS_MOUNT"
   local current=""
   if mountpoint -q "$NFS_MOUNT"; then
     current="$(findmnt -n -o SOURCE "$NFS_MOUNT" || true)"
   fi
-  if [ "$(norm_nfs "$current")" != "$(norm_nfs "$NFS_EXPORT")" ]; then
+  if ! nfs_same "$current" "$NFS_EXPORT"; then
     if mountpoint -q "$NFS_MOUNT"; then
       umount "$NFS_MOUNT" || die "could not unmount ${NFS_MOUNT} (mounted from ${current:-unknown})"
     fi
     timeout 30 mount -t nfs -o vers=3,proto=tcp,hard,timeo=600,retrans=2,nolock \
       "$NFS_EXPORT" "$NFS_MOUNT" \
-      || die "could not mount ${NFS_EXPORT} on ${NFS_MOUNT}. Check the Files IP, export path, and TCP 2049 from this VM."
+      || die "could not mount ${NFS_EXPORT} on ${NFS_MOUNT}. Check the Files name, export path, and TCP 2049 from this VM."
   fi
   local fstab_line="${NFS_EXPORT} ${NFS_MOUNT} nfs vers=3,proto=tcp,hard,timeo=600,retrans=2,nolock,_netdev 0 0"
   grep -v " ${NFS_MOUNT} " /etc/fstab > /etc/fstab.claims-desk.tmp || true
@@ -317,6 +400,8 @@ save_secret() {
     printf 'S3_ACCESS_KEY=%q\n' "$S3_ACCESS_KEY"
     printf 'S3_SECRET_KEY=%q\n' "$S3_SECRET_KEY"
     printf 'S3_REGION=%q\n' "$S3_REGION"
+    printf 'DNS_SERVER=%q\n' "$DNS_SERVER"
+    printf 'DNS_ZONE=%q\n' "$DNS_ZONE"
   } > "$SECRET"
   umask 022
   info "saved for the next run in ${SECRET} (root only, not read by the portal app)"
@@ -376,17 +461,21 @@ portal_stage3() {
   step "Document VM"
   if [ "$INTERACTIVE" -eq 1 ]; then
     info "This run logs into the document VM over SSH and installs the document service there."
-    info "NFSv3 by IP, for example 10.10.140.11:/claims-docs. Objects TLS is not verified."
+    info "NFSv3, for example labFS.ntnxlab.local:/documents. Objects TLS is not verified."
   fi
   ask DOC_HOST "Document VM IP"
   valid_ipv4 "$DOC_HOST" || die "Document VM IP must be an IPv4 address"
   ask DOC_SSH_USER "SSH user on the document VM" root
   [[ "$DOC_SSH_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || die "SSH user must be a short account name"
   ask DOC_SSH_KEY "SSH private key (Enter tries the agent, then /root/.ssh/claims-desk-lab)" ""
-  ask NFS_EXPORT "NFS export, IP:/path"
-  local nfs_host="${NFS_EXPORT%%:*}" nfs_path="${NFS_EXPORT#*:}"
-  valid_ipv4 "$nfs_host" || die "NFS export must start with an IPv4 address, for example 10.10.140.11:/claims-docs"
-  [[ "$nfs_path" == /* && "$nfs_path" != *" "* ]] || die "NFS export path must be absolute and contain no spaces"
+  ask NFS_EXPORT "NFS export, host:/path"
+  valid_nfs_export "$NFS_EXPORT" \
+    || die "NFS export must look like labFS.ntnxlab.local:/documents or 10.10.140.11:/claims-docs"
+  local nfs_host="${NFS_EXPORT%%:*}"
+  if ! valid_ipv4 "$nfs_host"; then
+    getent ahostsv4 "$nfs_host" >/dev/null \
+      || die "cannot resolve ${nfs_host} from this VM. Check /etc/resolv.conf."
+  fi
   ask NFS_MOUNT "Mount point on the document VM" /mnt/claims-docs
   [[ "$NFS_MOUNT" =~ ^/[A-Za-z0-9._/-]+$ && "$NFS_MOUNT" != *..* ]] || die "mount point must be an absolute path"
   ask S3_ENDPOINT "Objects endpoint URL"
@@ -394,8 +483,8 @@ portal_stage3() {
   [[ "$S3_ENDPOINT" =~ ^https?://[^[:space:]]+$ ]] || die "Objects endpoint must be an http(s) URL"
   ask S3_BUCKET "Bucket" claims
   [[ "$S3_BUCKET" =~ ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$ ]] || die "bucket name '$S3_BUCKET' is not a DNS-style bucket name"
-  ask_secret S3_ACCESS_KEY "Objects access key"
-  ask_secret S3_SECRET_KEY "Objects secret key"
+  ask_echo S3_ACCESS_KEY "Objects access key"
+  ask_echo S3_SECRET_KEY "Objects secret key"
   [ -n "$S3_ACCESS_KEY" ] || die "Objects access key is required"
   [ -n "$S3_SECRET_KEY" ] || die "Objects secret key is required"
   S3_REGION="${S3_REGION:-us-east-1}"
@@ -411,6 +500,13 @@ portal_stage3() {
   if [ "$DOC_SSH_USER" != "root" ]; then
     ssh_run sudo -n true || die "SSH user ${DOC_SSH_USER} needs passwordless sudo, or log in as root"
   fi
+
+  step "DNS"
+  local doc_short
+  doc_short="$(ssh_run hostname -s | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')"
+  [[ "$doc_short" =~ ^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$ ]] \
+    || die "document VM host name '${doc_short}' is not a DNS label"
+  dns_upsert "${doc_short}.${DNS_ZONE}" "$DOC_HOST"
   save_secret
 
   step "Copy the bundle"
@@ -488,6 +584,7 @@ $(printf '\033[1;32m')Claims Desk stage 3 is running.$(printf '\033[0m')
   Portal        https://${name}/   ${ip:+(or https://${ip}/)}
   Architecture  https://${name}/about
   Document VM   http://${DOC_HOST}:${DOC_PORT}/health
+  DNS           $(hostname -s).${DNS_ZONE} and ${doc_short}.${DNS_ZONE} on ${DNS_SERVER}
   Files         ${NFS_EXPORT} on the document VM at ${NFS_MOUNT} (NFSv3)
   Objects       ${S3_ENDPOINT}  bucket ${S3_BUCKET}  (TLS verification off)
   Photo         optional, stored on Files when the claim is submitted

@@ -67,9 +67,9 @@ In a Flow policy for `AppTier: Web`, the outbound rule to the database is the on
 
 [`deploy/cloud-init/portal-vm.yaml`](deploy/cloud-init/portal-vm.yaml) prepares a Rocky Linux 9 cloud image (GenericCloud qcow2) at first boot:
 
-- sets the host name (`portal01.claims.internal`) and time zone, and installs the lab SSH key for `rocky` and `root`
+- sets the host name (`portal01.ntnxlab.local`) and time zone, and installs the lab SSH key for `rocky` and `root`
 - sets the root password (lab default, stored as a SHA-512 hash) and allows SSH password logins, root included
-- trusts the lab CA and takes time from `lab01` (DNS comes from the subnet's IPAM settings)
+- trusts the lab CA, takes time from `lab01`, and uses Windows DNS `10.55.19.6` with search domain `ntnxlab.local`
 - runs `dnf upgrade` and installs nginx, python3.11, python3.11-pip, openssl and tar, plus psql, nc, dig, jq, chrony, git, rsync and vim
 - disables SELinux (now, in `/etc/selinux/config`, and with the `selinux=0` kernel argument)
 - stops and masks firewalld
@@ -94,15 +94,15 @@ On another admin machine, copy the private key to `~/.ssh/claims-desk-lab` (mode
 
 ### 1. Get the bundle onto the VM
 
-With the portal cloud-init, the VM has already downloaded and extracted it to `/opt/claims-desk-bundle/claims-desk-demo-0.2.1` (re-run with `sudo claims-desk-fetch-bundle`). Otherwise, on the VM:
+With the portal cloud-init, the VM has already downloaded and extracted it to `/opt/claims-desk-bundle/claims-desk-demo-0.2.2` (re-run with `sudo claims-desk-fetch-bundle`). Otherwise, on the VM:
 
-**Offline bundle (recommended).** Includes the Python wheels for Rocky 9, so the VM needs only its dnf repositories. The asset is attached when `v0.2.1` is tagged; until then copy this directory to the VM.
+**Offline bundle (recommended).** Includes the Python wheels for Rocky 9, so the VM needs only its dnf repositories. The asset is attached when `v0.2.2` is tagged; until then copy this directory to the VM.
 
 ```bash
-REL=https://github.com/apjgase/claims-desk-demo/releases/download/v0.2.1
-curl -fLO $REL/claims-desk-demo-0.2.1.tar.gz -fLO $REL/claims-desk-demo-0.2.1.tar.gz.sha256
-sha256sum -c claims-desk-demo-0.2.1.tar.gz.sha256
-tar -xzf claims-desk-demo-0.2.1.tar.gz && cd claims-desk-demo-0.2.1
+REL=https://github.com/apjgase/claims-desk-demo/releases/download/v0.2.2
+curl -fLO $REL/claims-desk-demo-0.2.2.tar.gz -fLO $REL/claims-desk-demo-0.2.2.tar.gz.sha256
+sha256sum -c claims-desk-demo-0.2.2.tar.gz.sha256
+tar -xzf claims-desk-demo-0.2.2.tar.gz && cd claims-desk-demo-0.2.2
 ```
 
 Without internet on the VM, download it elsewhere (GitHub, **Releases**) and copy it with `scp`.
@@ -182,8 +182,8 @@ One run, on the portal VM. It installs the document service on the document VM o
 
 | Item | Requirement |
 | :--- | :--- |
-| Document VM | Rocky Linux 9, prepared with [`deploy/cloud-init/document-vm.yaml`](deploy/cloud-init/document-vm.yaml). Hostname in that file is `docvm`. SSH from the portal must work (TCP 22). Default login is `root`; the lab root password is in the cloud-init, or use the lab key |
-| Files | NFSv3 export the document VM can mount by IP, for example `10.10.140.11:/claims-docs`. Read-write for that VM. The `claimsdesk` user on the document VM must be able to create a file (numeric uid, NFSv3) |
+| Document VM | Rocky Linux 9, prepared with [`deploy/cloud-init/document-vm.yaml`](deploy/cloud-init/document-vm.yaml). Hostname in that file is `docvm.ntnxlab.local`. DNS is Windows Server `10.55.19.6`. SSH from the portal must work (TCP 22). Default login is `root`; the lab root password is in the cloud-init, or use the lab key |
+| Files | NFSv3 export the document VM can mount by name or IP, for example `labFS.ntnxlab.local:/documents`. Read-write for that VM. The `claimsdesk` user on the document VM must be able to create a file (numeric uid, NFSv3) |
 | Objects | Path-style S3 endpoint, bucket (default `claims`), access key and secret key. TLS is not verified. A bucket default retention is what makes the packet WORM; the app PUTs the object |
 | Flow | Portal to document VM TCP 8090 and TCP 22. Document VM to Files TCP 2049. Document VM to Objects TCP 443 |
 
@@ -193,7 +193,7 @@ One run, on the portal VM. It installs the document service on the document VM o
 sudo ./update.sh --stage 3
 ```
 
-It asks for the document VM IP, the SSH user (default `root`) and an optional private key, the NFS export (`IP:/path`), the Objects URL, the bucket, and the keys. If key login fails it asks for the SSH password. `sshpass` is installed only in that case.
+It asks for the document VM IP, the SSH user (default `root`) and an optional private key, the NFS export (`labFS.ntnxlab.local:/documents` or an IP), the Objects URL, the bucket, and the keys. If key login fails it asks for the SSH password. `sshpass` is installed only in that case. `install.sh` registers the portal in Windows DNS (`10.55.19.6`, zone `ntnxlab.local`). This run registers the document VM the same way. The zone must allow nonsecure dynamic updates.
 
 Unattended: add the `DOC_*`, `NFS_*`, and `S3_*` lines from [`claims-desk.conf.example`](claims-desk.conf.example), then `sudo ./update.sh --stage 3 --config claims-desk.conf -y`. Delete that file afterwards. A root-only copy used for the next run is `/root/.claims-desk-stage3` on the portal. The portal application cannot read it. The keys the service uses are `/etc/claims-desk/docs.json` on the document VM.
 

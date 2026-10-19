@@ -11,13 +11,13 @@
 # Done when the VM has rebooted and /var/lib/claims-desk/vm-ready exists.
 
 hostname: portal01                          # EDIT
-fqdn: portal01.claims.internal              # EDIT
+fqdn: portal01.ntnxlab.local                # EDIT
 prefer_fqdn_over_hostname: true
 manage_etc_hosts: true
 timezone: Australia/Sydney                  # EDIT if needed
 
-# DNS comes from the subnet: set lab01 as the DNS server and claims.internal as the search
-# domain in the IPAM settings of the VPC subnet. Time comes from lab01.
+# DNS is the Windows Server at 10.55.19.6, search domain ntnxlab.local. It is pinned in
+# the guest so subnet DHCP cannot replace it. Time comes from lab01.
 ntp:
   enabled: true
   ntp_client: chrony
@@ -108,6 +108,12 @@ write_files:
     content: |
       # Claims Desk demo VM
       alias cdlog='sudo journalctl -u claims-api -u claims-web -u nginx -f'
+  # NetworkManager must not rewrite resolv.conf from DHCP.
+  - path: /etc/NetworkManager/conf.d/90-ntnxlab-dns.conf
+    permissions: "0644"
+    content: |
+      [main]
+      dns=none
   # Downloads the offline bundle at first boot from the public GitHub release. Without
   # internet, set BUNDLE_URL to an internal copy, or to "" and copy the bundle with scp.
   # Re-run by hand with: sudo claims-desk-fetch-bundle
@@ -116,7 +122,7 @@ write_files:
     content: |
       #!/bin/bash
       set -euo pipefail
-      BUNDLE_URL="${BUNDLE_URL-https://github.com/apjgase/claims-desk-demo/releases/download/v0.2.1/claims-desk-demo-0.2.1.tar.gz}"   # EDIT (optional)
+      BUNDLE_URL="${BUNDLE_URL-https://github.com/apjgase/claims-desk-demo/releases/download/v0.2.2/claims-desk-demo-0.2.2.tar.gz}"   # EDIT (optional)
       [ -n "$BUNDLE_URL" ] || { echo "no BUNDLE_URL set; copy the bundle with scp"; exit 0; }
       dest=/opt/claims-desk-bundle
       mkdir -p "$dest"
@@ -129,6 +135,8 @@ write_files:
       echo "bundle extracted to $dest; run: cd $dest/claims-desk-demo-* && sudo ./update.sh --stage 1"
 
 runcmd:
+  # Replace the NetworkManager symlink with a file. dns=none keeps DHCP from putting it back.
+  - [sh, -c, "rm -f /etc/resolv.conf; printf 'search ntnxlab.local\\nnameserver 10.55.19.6\\n' > /etc/resolv.conf; systemctl reload NetworkManager || true"]
   # SELinux: off now, and off after the reboot. On RHEL 9 the config file alone leaves
   # SELinux loaded without a policy; the selinux=0 kernel argument disables it fully.
   - [sh, -c, "setenforce 0 || true"]
