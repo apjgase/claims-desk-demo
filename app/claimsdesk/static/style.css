@@ -92,7 +92,13 @@ table.claims { width: 100%; border-collapse: collapse; background: var(--panel);
        display: flex; flex-direction: column; gap: 0.25rem; min-width: 200px; }
 .hop.down { border-color: var(--coral); border-style: dashed; }
 .hop code { color: var(--dim); }
-.arrow { align-self: center; color: var(--dim); font-size: 1.4rem; }
+.arrow { align-self: center; color: var(--dim); font-size: 1.4rem; text-align: center; }
+.arrow small { display: block; font-family: var(--mono); font-size: 0.68rem; letter-spacing: 0.02em; }
+.arch-overhead { margin: 0 1rem 0.15rem; border-bottom: 1px dashed var(--azure); text-align: center;
+                 color: var(--dim); font-family: var(--mono); font-size: 0.78rem; padding-bottom: 0.25rem; }
+.hop.nfs { border-color: var(--lime); }
+.hop.s3 { border-color: var(--green); }
+.hop.db { border-color: var(--azure); }
 .badge { font-family: var(--mono); font-size: 0.72rem; padding: 0.05rem 0.4rem; border-radius: 3px;
          align-self: flex-start; color: #fff; }
 .b-vm { background: var(--purple); }

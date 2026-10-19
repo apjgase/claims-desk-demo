@@ -64,9 +64,12 @@ def api(method: str, path: str, **kw) -> Tuple[Optional[Any], Optional[str], int
         detail = body or {}
         return None, "Database unavailable at {}: {}".format(
             detail.get("db_endpoint", "?"), detail.get("error", "no detail")), 503
-    if isinstance(body, dict) and body.get("documents"):
+    # A document-tier failure carries the document VM URL as a string. /api/v1/info
+    # also has a documents object; that is live health, not a failure.
+    if (r.status_code >= 400 and isinstance(body, dict)
+            and isinstance(body.get("documents"), str) and r.status_code not in (400, 404, 413, 415)):
         return None, "Document VM unavailable at {}: {}".format(
-            body.get("documents"), body.get("detail", "no detail")), r.status_code
+            body["documents"], body.get("detail", "no detail")), r.status_code
     if r.status_code >= 400:
         return body, None, r.status_code
     return body, None, r.status_code

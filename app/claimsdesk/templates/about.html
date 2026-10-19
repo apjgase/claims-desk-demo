@@ -4,6 +4,52 @@
 <h1>Request path</h1>
 <p class="lead">{{ stage }}. Every page you see took this path. The values are read live from each tier.</p>
 
+{% if info and info.documents and info.documents.enabled %}
+<div class="arch">
+  <div class="arch-overhead">TCP {{ info.db_endpoint.port }}</div>
+  <div class="path">
+    <div class="hop">
+      <span class="badge b-vm">VM</span>
+      <b>Portal VM</b>
+      <code>{{ web.hostname }}</code>
+      <code>{{ web.ip }} · HTTPS 443</code>
+    </div>
+    <div class="arrow">→</div>
+    <div class="hop {% if info.documents.status != 'ok' %}down{% endif %}">
+      <span class="badge b-vm">VM</span>
+      <b>Document VM</b>
+      {% if info.documents.host %}
+        <code>{{ info.documents.host.hostname }}</code>
+        <code>{{ info.documents.host.ip }} · :8090</code>
+      {% else %}<code>{{ info.documents.error or 'unreachable' }}</code>{% endif %}
+    </div>
+    <div class="arrow"><small>NFS 2049</small>→</div>
+    <div class="hop nfs {% if not (info.documents.nfs and info.documents.nfs.mounted) %}down{% endif %}">
+      <span class="badge b-nfs">NFS</span>
+      <b>Files</b>
+      <code>{{ info.documents.nfs.export if info.documents.nfs else 'unknown' }}</code>
+      <code>NFSv3 · 2049</code>
+    </div>
+    <div class="arrow"><small>S3 443</small>→</div>
+    <div class="hop s3">
+      <span class="badge b-s3">S3</span>
+      <b>Objects</b>
+      <code>{{ info.documents.s3.endpoint if info.documents.s3 else 'unknown' }}</code>
+      <code>bucket {{ info.documents.s3.bucket if info.documents.s3 else '?' }} · WORM</code>
+    </div>
+    <div class="hop db {% if not (info.db and info.db.status == 'ok') %}down{% endif %}">
+      <span class="badge b-db">DB</span>
+      <b>PostgreSQL{% if info.db_endpoint.port == 5000 %} HA{% endif %}</b>
+      <code>{{ info.db_endpoint.host }}:{{ info.db_endpoint.port }}</code>
+      {% if info.db.status == 'ok' %}
+        <code>served by {{ info.db.server_addr or 'local socket' }} · {{ 'replica' if info.db.in_recovery else 'primary' }}</code>
+      {% else %}
+        <code>unavailable</code>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% else %}
 <div class="path">
   <div class="hop">
     <span class="badge b-vm">CLIENT</span>
@@ -38,6 +84,7 @@
     {% else %}<code>unknown</code>{% endif %}
   </div>
 </div>
+{% endif %}
 
 {% if info and info.db.status == 'ok' %}
 <dl class="details">
@@ -47,40 +94,6 @@
 </dl>
 {% elif info %}
 <div class="banner error">{{ info.db.error }}</div>
-{% endif %}
-
-{% if info and info.documents and info.documents.enabled %}
-<h2>Document tier</h2>
-<div class="path">
-  <div class="hop">
-    <span class="badge b-vm">API</span>
-    <b>Middleware</b>
-    <code>{{ info.documents.url }}</code>
-  </div>
-  <div class="arrow">→</div>
-  <div class="hop {% if info.documents.status != 'ok' %}down{% endif %}">
-    <span class="badge b-vm">VM</span>
-    <b>Document VM</b>
-    {% if info.documents.host %}
-      <code>{{ info.documents.host.hostname }}</code>
-      <code>{{ info.documents.host.ip }} · :8090</code>
-    {% else %}<code>{{ info.documents.error or 'unreachable' }}</code>{% endif %}
-  </div>
-  <div class="arrow">→</div>
-  <div class="hop {% if not (info.documents.nfs and info.documents.nfs.mounted) %}down{% endif %}">
-    <span class="badge b-nfs">NFS</span>
-    <b>Files</b>
-    <code>{{ info.documents.nfs.export if info.documents.nfs else 'unknown' }}</code>
-    <code>NFSv3 · 2049</code>
-  </div>
-  <div class="arrow">→</div>
-  <div class="hop">
-    <span class="badge b-s3">S3</span>
-    <b>Objects</b>
-    <code>{{ info.documents.s3.endpoint if info.documents.s3 else 'unknown' }}</code>
-    <code>bucket {{ info.documents.s3.bucket if info.documents.s3 else '?' }} · WORM</code>
-  </div>
-</div>
 {% endif %}
 
 <h2>What to look for</h2>

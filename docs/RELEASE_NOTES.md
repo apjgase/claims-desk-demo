@@ -1,3 +1,5 @@
+`0.2.4`: the architecture page keeps the live middleware reply, so stage 3 shows Portal, Document VM, Files, Objects, and PostgreSQL, and the photo field is enabled.
+
 `0.2.3`: a refused Windows DNS update is a warning. The install continues.
 
 `0.2.2`: an NFS export may be a hostname (`labFS.ntnxlab.local:/documents`). `install.sh` registers the portal, and `update.sh --stage 3` registers the document VM, as A records on Windows DNS `10.55.19.6` in `ntnxlab.local`. The zone must allow nonsecure dynamic updates.

@@ -128,6 +128,9 @@ def test_web_flow(web_client):
     assert web_client.get("/claims/CLM-999999").status_code == 404
     about = web_client.get("/about")
     assert "Request path" in about.text and "primary" in about.text
+    assert "unreachable" not in about.text
+    new_page = web_client.get("/claims/new")
+    assert 'type="file" disabled' in new_page.text
     assert web_client.get("/healthz").json()["backend"] == "ok"
     assert web_client.get("/static/style.css").status_code == 200
 
@@ -162,6 +165,35 @@ def test_api_when_db_down(database):
             assert c.get("/api/v1/info").json()["db"]["status"] == "unavailable"
     finally:
         api.pool = saved
+
+
+def test_stage3_about_and_photo_field(web_client, monkeypatch):
+    from claimsdesk import api, web
+
+    def fake_health(_cfg):
+        return {
+            "enabled": True,
+            "status": "ok",
+            "url": "http://10.1.1.8:8090",
+            "host": {"hostname": "docvm.ntnxlab.local", "ip": "10.1.1.8"},
+            "nfs": {"export": "labFS.ntnxlab.local:/documents", "mount": "/mnt/claims-docs", "mounted": True},
+            "s3": {"endpoint": "https://objects.example", "bucket": "claims"},
+        }
+
+    monkeypatch.setattr(api, "docs_health", fake_health)
+    web._info_cache["data"] = None
+    try:
+        about = web_client.get("/about")
+        assert about.status_code == 200
+        assert "Portal VM" in about.text and "Document VM" in about.text
+        assert "labFS.ntnxlab.local:/documents" in about.text
+        assert "NFS 2049" in about.text and "S3 443" in about.text
+        assert "primary" in about.text and "unreachable" not in about.text
+        page = web_client.get("/claims/new")
+        assert 'type="file" name="photo"' in page.text
+        assert 'type="file" disabled' not in page.text
+    finally:
+        web._info_cache["data"] = None
 
 
 def test_photo_and_packet(api_client, monkeypatch):
