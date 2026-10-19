@@ -153,7 +153,8 @@ write_files:
         awk -v n="$1" '/^[[:space:]]*#/ {print; next} {for (i = 2; i <= NF; i++) if ($i == n) next; print}' "$HOSTS" > "$tmp"
         cat "$tmp" > "$HOSTS"; rm -f "$tmp"
       }
-      reload() { systemctl restart dnsmasq; }
+      # reset-failed clears systemd's start rate limit, so scripted bulk changes work.
+      reload() { systemctl reset-failed dnsmasq 2>/dev/null || true; systemctl restart dnsmasq; }
       case "${1:-}" in
         list)
           grep -hv '^[[:space:]]*#' "$HOSTS" "$WILD" | sed '/^[[:space:]]*$/d' ;;
