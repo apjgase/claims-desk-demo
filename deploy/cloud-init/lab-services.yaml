@@ -1,0 +1,282 @@
+#cloud-config
+# Claims Desk lab services VM (lab01): DNS for claims.internal, NTP for the lab, and the
+# admin jump host. Rocky Linux 9 GenericCloud image on AHV.
+#
+# Size: 4 vCPU, 16 GB RAM, 60 GB disk. NIC on the management network with a fixed IP:
+# pick the address in Prism when you attach the NIC (EDIT below to match). Then set this
+# address as the DNS and NTP server in every subnet's IPAM settings, in Prism Central and
+# Prism Element, in NDB, Files and Objects, and for NKP.
+#
+# Prism Central: Create VM > Guest Customization > Cloud-init (Linux) > Custom Script.
+# Progress: sudo tail -f /var/log/cloud-init-output.log. Ready when the VM has rebooted
+# and /var/lib/claims-desk/vm-ready exists.
+#
+# On the VM:
+#   lab-dns add NAME IP[,IP] [ALIAS]  A + PTR records in claims.internal (several IPs: round robin)
+#   lab-dns wildcard NAME IP          *.NAME.claims.internal, e.g. lab-dns wildcard apps 10.10.120.150
+#   lab-dns del NAME | list | test NAME
+#   chronyc clients                   who is taking time from this VM
+
+hostname: lab01
+fqdn: lab01.claims.internal
+prefer_fqdn_over_hostname: true
+manage_etc_hosts: true
+timezone: Australia/Sydney                  # EDIT if needed
+
+# SSH: lab key for the default user (rocky) and root; password logins on. Lab only.
+users:
+  - default
+ssh_authorized_keys:
+  - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGfO43mMt4kOUNA2UA2fykY4gWVU3WyXK9WY+cw8WGIa claims-desk-lab (maksim.malygin@nutanix.com)
+disable_root: false
+ssh_pwauth: true
+chpasswd:
+  expire: false
+  users:
+    - name: root
+      password: "$6$whTT6hc2ODon5KWm$Yh5tPeCHOO9dkLe1uZRJQrd6s3aeo12xCq5/fKAuTGUx2uKTROrgUiYz2bW.iC5OhYAIftH0GHNT0Yjsc/tON/"
+      type: hash
+
+# Lab CA (deploy/pki/claims-internal-ca.crt). Its key stays on the admin laptop.
+ca_certs:
+  trusted:
+    - |
+      -----BEGIN CERTIFICATE-----
+      MIIEozCCAwugAwIBAgIJAL7M+Gf8+rkuMA0GCSqGSIb3DQEBCwUAMEkxGDAWBgNV
+      BAoMD0NsYWltcyBEZXNrIGxhYjEtMCsGA1UEAwwkQ2xhaW1zIERlc2sgbGFiIENB
+      IChjbGFpbXMuaW50ZXJuYWwpMB4XDTI2MTAxOTAxMzIyOVoXDTM2MTAxNjAxMzIy
+      OVowSTEYMBYGA1UECgwPQ2xhaW1zIERlc2sgbGFiMS0wKwYDVQQDDCRDbGFpbXMg
+      RGVzayBsYWIgQ0EgKGNsYWltcy5pbnRlcm5hbCkwggGiMA0GCSqGSIb3DQEBAQUA
+      A4IBjwAwggGKAoIBgQDaolVQAO4fKGggUmkNb66HiNjKDAZTr5vZcPMc+7mC3w01
+      8niH+WX17LOqsvC66sFDfQoIYHQK5CZzEM2iJSqiEHdKyY4Dsuf9oRQmH7eqwE31
+      TCzFU/hchLpOY+EVXMr5VgRWQ90ZPYNzB3wGAVWn+8pY7S78ouUu8R4iEwzpESpP
+      gT8iMpAdMyMMgKeOGisI4IQ4LQdSSVt4S+fgwdvDju7BgXCBW7/Fmi/PLwXIMDB4
+      lZAlHHtxgAVd4DaEBmgOZleuGyjsKhd8+M/Vqp91DBGgxCA6/QGBpMeJAmay9wmz
+      glW4z6mxdiakbSRMOLOdaO3x81j5gRuJO4nmgtKvKzxi3K1tsDWi95RK3WvoV1Tm
+      zWAGaFZYaFGOCCaZWJSchyxpEg8XPg11IlIm2muMA95rKUnFlKIQXPZbdI3Q1Qvd
+      eRFBhCThy2wxhV4oFwaDYdL70FAR1eSHrlDZpNdLtrG1E4Rf/3LpEruoIw2z/EON
+      24xfesbWCLOALkyB+AkCAwEAAaOBjTCBijASBgNVHRMBAf8ECDAGAQH/AgEAMA4G
+      A1UdDwEB/wQEAwIBBjAdBgNVHQ4EFgQUf0inlk7PCoxoHCWsrn7nMDRlb3YwRQYD
+      VR0eAQH/BDswOaA3MBGCD2NsYWltcy5pbnRlcm5hbDAKhwgKAAAA/wAAADAKhwis
+      EAAA//AAADAKhwjAqAAA//8AADANBgkqhkiG9w0BAQsFAAOCAYEAaVOW56C9loHq
+      jTnC7nCyuccG/tc+TohKr7kgp2XalFYU1FzQFHpb0yEcLxOkjJbT49lPgKslg1DK
+      W6yFxWJNjZaU/FRnPoIuKkDuYLn2rxCQ4IyZd48CLZdKHmefNxV/jiRjx3o/4d6R
+      Y1FvnnY3gGggfYz0wyyQdZ/8rZkFD6XLkpMSeNcXpeDIS/vYx6dqE1pqcv7hk+YO
+      kepDgacldY9HPxUr3t8DvxliHknsOgJtTO/U+gulOGis8I+NhD8AEMQEwHNybApe
+      BOwpwZ/YyF14VhZPWKhT+ugfjIrILp88oHLQQqaBuG/AFcBBkRNOSmL5RA4TKaK0
+      Fu2TN2gYfy57edsXbenoOqGtZt+43P/xmPJ95jxOrXPp84MkQT9zTrhTMK5KO2nz
+      C8SqZ0iz3Mn5fJQIJgLCY7G3Vrre8HPawLOReB+SuMoWJlJN4ctjr9D7y/IvqhD+
+      L2jIOZXDmYKlUmFGfd2p2qlemO/UXFKQ2b+0sdUTS5/IOLqGXLvd
+      -----END CERTIFICATE-----
+
+package_update: true
+package_upgrade: true
+packages:
+  # Lab services
+  - dnsmasq
+  - chrony
+  # Jump host
+  - podman              # container runtime for building images and the NKP bootstrap *verify Docker vs Podman for your NKP version*
+  - postgresql          # psql
+  - nfs-utils           # mount and check Nutanix Files exports
+  - python3.11
+  - python3.11-pip
+  - bind-utils
+  - nmap-ncat
+  - jq
+  - git
+  - rsync
+  - tar
+  - unzip
+  - openssl
+  - tmux
+  - bash-completion
+  - vim-enhanced
+
+write_files:
+  - path: /etc/ssh/sshd_config.d/01-claims-desk-lab.conf
+    permissions: "0600"
+    content: |
+      PermitRootLogin yes
+      PasswordAuthentication yes
+
+  # DNS: answers for claims.internal from the records file, forwards everything else.
+  # Written after the packages (defer), so it replaces the packaged dnsmasq.conf.
+  - path: /etc/dnsmasq.conf
+    permissions: "0644"
+    defer: true
+    content: |
+      # Claims Desk lab DNS. Records: /etc/claims-lab/hosts (lab-dns add ...).
+      domain-needed
+      bogus-priv
+      no-resolv
+      # Upstream resolvers for everything outside claims.internal. EDIT if the lab has its own.
+      server=1.1.1.1
+      server=8.8.8.8
+      # claims.internal is answered here only; unknown names get NXDOMAIN, not forwarded.
+      local=/claims.internal/
+      domain=claims.internal
+      expand-hosts
+      no-hosts
+      addn-hosts=/etc/claims-lab/hosts
+      conf-file=/etc/claims-lab/wildcards.conf
+      cache-size=1000
+  - path: /etc/claims-lab/hosts
+    permissions: "0644"
+    content: |
+      # claims.internal records: IP  FQDN  short name  (PTR records are automatic)
+      # Manage with: lab-dns add NAME IP [ALIAS ...]   /   lab-dns del NAME
+      10.10.110.50 lab01.claims.internal lab01   # EDIT: this VM's address
+  - path: /etc/claims-lab/wildcards.conf
+    permissions: "0644"
+    content: |
+      # Wildcards: address=/NAME.claims.internal/IP answers NAME and every name below it.
+      # Manage with: lab-dns wildcard NAME IP   /   lab-dns unwildcard NAME
+  - path: /usr/local/bin/lab-dns
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      # Manage claims.internal records on lab01.
+      set -euo pipefail
+      HOSTS=/etc/claims-lab/hosts
+      WILD=/etc/claims-lab/wildcards.conf
+      DOMAIN=claims.internal
+      usage() {
+        echo "usage: lab-dns list | add NAME IP[,IP...] [ALIAS ...] | del NAME | wildcard NAME IP | unwildcard NAME | test NAME" >&2
+        exit 1
+      }
+      fq() { case "$1" in *."$DOMAIN") echo "$1" ;; *) echo "$1.$DOMAIN" ;; esac; }
+      short() { local f; f="$(fq "$1")"; echo "${f%."$DOMAIN"}"; }
+      need_root() { [ "$(id -u)" -eq 0 ] || { echo "run as root: sudo lab-dns $*" >&2; exit 1; }; }
+      drop() {
+        local tmp; tmp="$(mktemp)"
+        awk -v n="$1" '/^[[:space:]]*#/ {print; next} {for (i = 2; i <= NF; i++) if ($i == n) next; print}' "$HOSTS" > "$tmp"
+        cat "$tmp" > "$HOSTS"; rm -f "$tmp"
+      }
+      reload() { systemctl restart dnsmasq; }
+      case "${1:-}" in
+        list)
+          grep -hv '^[[:space:]]*#' "$HOSTS" "$WILD" | sed '/^[[:space:]]*$/d' ;;
+        add)
+          [ $# -ge 3 ] || usage; need_root "$@"
+          name="$(fq "$2")"; ips="$3"; shift 3
+          drop "$name"
+          names="$name $(short "$name")"
+          for a in "$@"; do drop "$(fq "$a")"; names="$names $(fq "$a") $(short "$a")"; done
+          IFS=, read -ra iplist <<< "$ips"
+          for ip in "${iplist[@]}"; do echo "$ip $names" >> "$HOSTS"; echo "added: $ip $names"; done
+          reload ;;
+        del)
+          [ $# -eq 2 ] || usage; need_root "$@"
+          drop "$(fq "$2")"; reload; echo "deleted: $(fq "$2")" ;;
+        wildcard)
+          [ $# -eq 3 ] || usage; need_root "$@"
+          name="$(fq "$2")"
+          grep -v "^address=/$name/" "$WILD" > "$WILD.tmp" || true
+          echo "address=/$name/$3" >> "$WILD.tmp"; cat "$WILD.tmp" > "$WILD"; rm -f "$WILD.tmp"
+          reload; echo "added: *.$name -> $3" ;;
+        unwildcard)
+          [ $# -eq 2 ] || usage; need_root "$@"
+          name="$(fq "$2")"
+          grep -v "^address=/$name/" "$WILD" > "$WILD.tmp" || true
+          cat "$WILD.tmp" > "$WILD"; rm -f "$WILD.tmp"; reload; echo "deleted: *.$name" ;;
+        test)
+          [ $# -eq 2 ] || usage
+          dig +short @127.0.0.1 "$(fq "$2")" ;;
+        *) usage ;;
+      esac
+
+  # NTP: serves time to the lab, keeps serving if the internet source is lost.
+  - path: /etc/chrony.conf
+    permissions: "0644"
+    defer: true
+    content: |
+      # Claims Desk lab NTP. EDIT the pool if the lab has a preferred upstream.
+      pool 2.rocky.pool.ntp.org iburst
+      driftfile /var/lib/chrony/drift
+      makestep 1.0 3
+      rtcsync
+      allow 10.0.0.0/8
+      allow 172.16.0.0/12
+      allow 192.168.0.0/16
+      local stratum 10
+      keyfile /etc/chrony.keys
+      leapsectz right/UTC
+      logdir /var/log/chrony
+
+  # Admin tools that are not in the Rocky repositories. Safe to re-run.
+  - path: /usr/local/sbin/lab-tools-install
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      set -euo pipefail
+      # Match the NKP cluster's Kubernetes minor version (kubectl supports +/- one minor).
+      KUBE_MINOR="${KUBE_MINOR:-v1.32}"
+      echo "== kubectl ($KUBE_MINOR)"
+      cat > /etc/yum.repos.d/kubernetes.repo <<EOF
+      [kubernetes]
+      name=Kubernetes
+      baseurl=https://pkgs.k8s.io/core:/stable:/${KUBE_MINOR}/rpm/
+      enabled=1
+      gpgcheck=1
+      gpgkey=https://pkgs.k8s.io/core:/stable:/${KUBE_MINOR}/rpm/repodata/repomd.xml.key
+      EOF
+      dnf -y -q install kubectl
+      echo "== GitHub CLI (download releases of the private demo repository)"
+      curl -fsSL https://cli.github.com/packages/rpm/gh-cli.repo -o /etc/yum.repos.d/gh-cli.repo
+      dnf -y -q install gh
+      echo "== helm"
+      if ! command -v helm >/dev/null 2>&1; then
+        curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | HELM_INSTALL_DIR=/usr/local/bin bash
+      fi
+      echo "== AWS CLI (S3 client for Nutanix Objects)"
+      if ! command -v aws >/dev/null 2>&1; then
+        tmp="$(mktemp -d)"
+        curl -fsSL https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o "$tmp/awscli.zip"
+        unzip -q "$tmp/awscli.zip" -d "$tmp"
+        "$tmp/aws/install"
+        rm -rf "$tmp"
+      fi
+      echo "== k9s"
+      if ! command -v k9s >/dev/null 2>&1; then
+        curl -fsSL https://github.com/derailed/k9s/releases/latest/download/k9s_Linux_amd64.tar.gz | tar -xz -C /usr/local/bin k9s
+      fi
+      kubectl completion bash > /etc/bash_completion.d/kubectl
+      /usr/local/bin/helm completion bash > /etc/bash_completion.d/helm
+      echo "== versions"
+      kubectl version --client 2>/dev/null | head -1
+      /usr/local/bin/helm version --short
+      /usr/local/bin/aws --version
+      /usr/local/bin/k9s version -s 2>/dev/null | head -1 || true
+      gh --version | head -1
+      echo "nkp CLI: download the NKP bundle from the Nutanix portal (sign-in required) and copy nkp to /usr/local/bin"
+  - path: /etc/profile.d/claims-lab.sh
+    permissions: "0644"
+    content: |
+      alias k=kubectl
+      complete -o default -F __start_kubectl k 2>/dev/null || true
+      export PATH="$PATH:/usr/local/bin"
+
+runcmd:
+  - [sh, -c, "setenforce 0 || true"]
+  - [sed, -i, "s/^SELINUX=.*/SELINUX=disabled/", /etc/selinux/config]
+  - [grubby, --update-kernel, ALL, --args, selinux=0]
+  - [sh, -c, "systemctl disable --now firewalld 2>/dev/null || true"]
+  - [systemctl, mask, firewalld]
+  - [sh, -c, "sshd -t && systemctl restart sshd"]
+  - [systemctl, enable, --now, dnsmasq]
+  - [systemctl, enable, --now, chronyd]
+  - [systemctl, restart, chronyd]
+  # This VM resolves through its own dnsmasq, so claims.internal names work here too.
+  - [sh, -c, "printf '[main]\\ndns=none\\n' > /etc/NetworkManager/conf.d/90-claims-lab-dns.conf && systemctl reload NetworkManager"]
+  - [sh, -c, "printf 'search claims.internal\\nnameserver 127.0.0.1\\n' > /etc/resolv.conf"]
+  - [/usr/local/sbin/lab-tools-install]
+  - [mkdir, -p, /var/lib/claims-desk]
+  - [sh, -c, "date -Is > /var/lib/claims-desk/vm-ready"]
+
+power_state:
+  mode: reboot
+  delay: now
+  message: "Claims Desk lab services VM prepared; rebooting"
+  timeout: 60
+  condition: true

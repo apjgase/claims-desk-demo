@@ -26,7 +26,7 @@ RUN dnf -y -q install systemd procps-ng hostname iproute && dnf clean all
 STOPSIGNAL SIGRTMIN+3
 CMD ["/usr/sbin/init"]
 EOF
-docker run -d --name "$VM" --hostname portal01.claims.example --network "$NET" \
+docker run -d --name "$VM" --hostname portal01.claims.internal --network "$NET" \
   --privileged --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw \
   -v "$BUNDLE":/bundle:ro claimsdesk-rocky9-systemd >/dev/null
 

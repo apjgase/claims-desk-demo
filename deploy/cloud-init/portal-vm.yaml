@@ -10,10 +10,52 @@
 # Done when the VM has rebooted and /var/lib/claims-desk/vm-ready exists.
 
 hostname: portal01                          # EDIT
-fqdn: portal01.claims.example               # EDIT
+fqdn: portal01.claims.internal              # EDIT
 prefer_fqdn_over_hostname: true
 manage_etc_hosts: true
 timezone: Australia/Sydney                  # EDIT if needed
+
+# DNS comes from the subnet: set lab01 as the DNS server and claims.internal as the search
+# domain in the IPAM settings of the VPC subnet. Time comes from lab01.
+ntp:
+  enabled: true
+  ntp_client: chrony
+  servers:
+    - 10.10.110.50                          # EDIT: lab01
+  pools:
+    - 2.rocky.pool.ntp.org                  # fallback
+
+# Lab CA (deploy/pki/claims-internal-ca.crt), so this VM trusts lab certificates.
+ca_certs:
+  trusted:
+    - |
+      -----BEGIN CERTIFICATE-----
+      MIIEozCCAwugAwIBAgIJAL7M+Gf8+rkuMA0GCSqGSIb3DQEBCwUAMEkxGDAWBgNV
+      BAoMD0NsYWltcyBEZXNrIGxhYjEtMCsGA1UEAwwkQ2xhaW1zIERlc2sgbGFiIENB
+      IChjbGFpbXMuaW50ZXJuYWwpMB4XDTI2MTAxOTAxMzIyOVoXDTM2MTAxNjAxMzIy
+      OVowSTEYMBYGA1UECgwPQ2xhaW1zIERlc2sgbGFiMS0wKwYDVQQDDCRDbGFpbXMg
+      RGVzayBsYWIgQ0EgKGNsYWltcy5pbnRlcm5hbCkwggGiMA0GCSqGSIb3DQEBAQUA
+      A4IBjwAwggGKAoIBgQDaolVQAO4fKGggUmkNb66HiNjKDAZTr5vZcPMc+7mC3w01
+      8niH+WX17LOqsvC66sFDfQoIYHQK5CZzEM2iJSqiEHdKyY4Dsuf9oRQmH7eqwE31
+      TCzFU/hchLpOY+EVXMr5VgRWQ90ZPYNzB3wGAVWn+8pY7S78ouUu8R4iEwzpESpP
+      gT8iMpAdMyMMgKeOGisI4IQ4LQdSSVt4S+fgwdvDju7BgXCBW7/Fmi/PLwXIMDB4
+      lZAlHHtxgAVd4DaEBmgOZleuGyjsKhd8+M/Vqp91DBGgxCA6/QGBpMeJAmay9wmz
+      glW4z6mxdiakbSRMOLOdaO3x81j5gRuJO4nmgtKvKzxi3K1tsDWi95RK3WvoV1Tm
+      zWAGaFZYaFGOCCaZWJSchyxpEg8XPg11IlIm2muMA95rKUnFlKIQXPZbdI3Q1Qvd
+      eRFBhCThy2wxhV4oFwaDYdL70FAR1eSHrlDZpNdLtrG1E4Rf/3LpEruoIw2z/EON
+      24xfesbWCLOALkyB+AkCAwEAAaOBjTCBijASBgNVHRMBAf8ECDAGAQH/AgEAMA4G
+      A1UdDwEB/wQEAwIBBjAdBgNVHQ4EFgQUf0inlk7PCoxoHCWsrn7nMDRlb3YwRQYD
+      VR0eAQH/BDswOaA3MBGCD2NsYWltcy5pbnRlcm5hbDAKhwgKAAAA/wAAADAKhwis
+      EAAA//AAADAKhwjAqAAA//8AADANBgkqhkiG9w0BAQsFAAOCAYEAaVOW56C9loHq
+      jTnC7nCyuccG/tc+TohKr7kgp2XalFYU1FzQFHpb0yEcLxOkjJbT49lPgKslg1DK
+      W6yFxWJNjZaU/FRnPoIuKkDuYLn2rxCQ4IyZd48CLZdKHmefNxV/jiRjx3o/4d6R
+      Y1FvnnY3gGggfYz0wyyQdZ/8rZkFD6XLkpMSeNcXpeDIS/vYx6dqE1pqcv7hk+YO
+      kepDgacldY9HPxUr3t8DvxliHknsOgJtTO/U+gulOGis8I+NhD8AEMQEwHNybApe
+      BOwpwZ/YyF14VhZPWKhT+ugfjIrILp88oHLQQqaBuG/AFcBBkRNOSmL5RA4TKaK0
+      Fu2TN2gYfy57edsXbenoOqGtZt+43P/xmPJ95jxOrXPp84MkQT9zTrhTMK5KO2nz
+      C8SqZ0iz3Mn5fJQIJgLCY7G3Vrre8HPawLOReB+SuMoWJlJN4ctjr9D7y/IvqhD+
+      L2jIOZXDmYKlUmFGfd2p2qlemO/UXFKQ2b+0sdUTS5/IOLqGXLvd
+      -----END CERTIFICATE-----
 
 # SSH: the lab key works for the default user (rocky on Rocky Linux, cloud-user on RHEL)
 # and for root. Password logins are on, root included. Lab only.
@@ -92,7 +134,6 @@ runcmd:
   # Firewall: stop and mask firewalld (cloud images may not ship it; both steps tolerate that).
   - [sh, -c, "systemctl disable --now firewalld 2>/dev/null || true"]
   - [systemctl, mask, firewalld]
-  - [systemctl, enable, --now, chronyd]
   - [sh, -c, "sshd -t && systemctl restart sshd"]
   - [/usr/local/sbin/claims-desk-fetch-bundle]
   - [mkdir, -p, /var/lib/claims-desk]

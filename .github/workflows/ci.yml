@@ -22,13 +22,38 @@ jobs:
         run: |
           pip install -q -r app/requirements.txt -c app/constraints.txt pytest pgserver
           python -m pytest -q -p no:cacheprovider tests
-      - name: ShellCheck
-        run: shellcheck -x install.sh uninstall.sh deploy/claims-desk scripts/*.sh
+      - name: ShellCheck (including scripts embedded in cloud-init)
+        run: |
+          shellcheck -x install.sh uninstall.sh deploy/claims-desk scripts/*.sh
+          pip install -q pyyaml
+          mkdir -p /tmp/embedded
+          python - <<'PY'
+          import glob, os, yaml
+          for ci in glob.glob("deploy/cloud-init/*.yaml"):
+              for f in yaml.safe_load(open(ci)).get("write_files", []):
+                  if f["content"].startswith("#!/bin/bash"):
+                      name = os.path.basename(ci)[:-5] + "_" + os.path.basename(f["path"])
+                      open(f"/tmp/embedded/{name}", "w").write(f["content"])
+          PY
+          ls /tmp/embedded
+          shellcheck /tmp/embedded/*
       - name: cloud-init schema (Rocky Linux 9's cloud-init)
         run: |
           docker run --rm -v "$PWD/deploy/cloud-init:/ci:ro" rockylinux/rockylinux:9 bash -c \
             "dnf -y -q install cloud-init >/dev/null && cloud-init --version && \
              for f in /ci/*.yaml; do cloud-init schema --config-file \$f --annotate; done"
+
+  lab-services:
+    needs: test
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -q pyyaml
+      - name: lab01 cloud-init on Rocky Linux 9 (DNS, NTP, CA trust, admin tools)
+        run: bash scripts/test-lab-services.sh
 
   e2e:
     needs: test

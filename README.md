@@ -12,7 +12,7 @@ The working application behind the Claims Desk architecture deck. An adjuster su
 | 6 | 10 | UAT copy by NCM Self-Service from a masked NDB clone | Planned |
 
 Design, API, data model and a demo run sheet: [`docs/STAGE1.md`](docs/STAGE1.md).
-Everything else the lab needs for the full demo (DNS, NTP, certificates, IP plan, registries, NKP, NAI, NC2): [`docs/LAB.md`](docs/LAB.md).
+Everything else the lab needs for the full demo (the `lab01` DNS/NTP/jump host VM, the lab CA, IP plan, registry, NKP, NAI): [`docs/LAB.md`](docs/LAB.md). Deploy `lab01` before the portal.
 
 ## Stage 1 at a glance
 
@@ -67,14 +67,15 @@ In a Flow policy for `AppTier: Web`, the outbound rule to the database is the on
 
 [`deploy/cloud-init/portal-vm.yaml`](deploy/cloud-init/portal-vm.yaml) prepares a Rocky Linux 9 cloud image (GenericCloud qcow2) at first boot:
 
-- sets the host name and time zone, and installs the lab SSH key for `rocky` and `root`
+- sets the host name (`portal01.claims.internal`) and time zone, and installs the lab SSH key for `rocky` and `root`
 - sets the root password (lab default, stored as a SHA-512 hash) and allows SSH password logins, root included
+- trusts the lab CA and takes time from `lab01` (DNS comes from the subnet's IPAM settings)
 - runs `dnf upgrade` and installs nginx, python3.11, python3.11-pip, openssl and tar, plus psql, nc, dig, jq, chrony, git, rsync and vim
 - disables SELinux (now, in `/etc/selinux/config`, and with the `selinux=0` kernel argument)
 - stops and masks firewalld
 - reboots once
 
-In Prism Central: **Create VM → Guest Customization → Cloud-init (Linux) → Custom Script**, and paste the file after editing the lines marked `EDIT` (host name, FQDN). The lab SSH key is already in it. The VM needs dnf repository access during first boot. It is ready when `/var/lib/claims-desk/vm-ready` exists; first-boot output is in `/var/log/cloud-init-output.log`. With the packages already present, `install.sh` skips dnf, reports SELinux and firewalld as disabled, and needs no repository access.
+In Prism Central: **Create VM → Guest Customization → Cloud-init (Linux) → Custom Script**, and paste the file after editing the lines marked `EDIT` (host name, FQDN, `lab01` address). The lab SSH key is already in it. The VM needs dnf repository access during first boot. It is ready when `/var/lib/claims-desk/vm-ready` exists; first-boot output is in `/var/log/cloud-init-output.log`. With the packages already present, `install.sh` skips dnf, reports SELinux and firewalld as disabled, and needs no repository access.
 
 Optionally, set `BUNDLE_URL` in the file to an internal address that serves the offline bundle; the VM then extracts it to `/opt/claims-desk-bundle`. The GitHub release needs a token, so for GitHub copy the bundle with `scp` (step 1).
 
@@ -84,7 +85,7 @@ One key pair for every lab machine. The public key is [`deploy/ssh/claims-desk-l
 
 | Where | How |
 | :--- | :--- |
-| Portal VM | Already in `deploy/cloud-init/portal-vm.yaml`; log in as `rocky` |
+| Portal VM, `lab01` | Already in both cloud-init files; log in as `rocky` or `root` |
 | NDB database server VMs | Paste the public key into the SSH public key field when provisioning the database server |
 | NKP clusters (later stages) | `--ssh-public-key-file deploy/ssh/claims-desk-lab.pub` |
 | Any other VM | Prism guest customization, or `ssh-copy-id -i ~/.ssh/claims-desk-lab.pub user@host` |
@@ -129,6 +130,8 @@ It asks:
 | Password for the application role | generated | Stored only in `/etc/claims-desk/api.json` (0640) |
 | TLS to PostgreSQL | `prefer` | `require` or `verify-full` if your NDB instance has TLS |
 | TLS server name | VM's FQDN | Used for the self-signed certificate |
+
+**Lab CA certificate instead of self-signed:** issue it on the laptop with `scripts/lab-ca.sh issue portal portal01`, copy `fullchain.pem` and `key.pem` from `~/.claims-desk-lab/ca/issued/portal.claims.internal/` to the VM, and run `sudo TLS_CERT=fullchain.pem TLS_KEY=key.pem ./install.sh`.
 
 The admin password is used once and is not stored. The run is logged to `/var/log/claims-desk-install.log`. Passwords are not written there.
 
@@ -192,6 +195,7 @@ sudo claims-desk logs 200   # nginx, claims-web, claims-api
 bash scripts/test.sh            # tests against a throwaway PostgreSQL (pgserver); no VM needed
 bash scripts/build-bundle.sh    # dist/claims-desk-demo-<version>.tar.gz with Rocky 9 wheels
 bash scripts/e2e-rocky9.sh      # install.sh on Rocky 9 + systemd + PostgreSQL 16 in Docker (Linux host)
+bash scripts/test-lab-services.sh   # lab01 cloud-init on Rocky 9 in Docker: DNS, NTP, CA trust, tools
 ```
 
-GitHub Actions runs all three on every push to `main`. A tag `v*` attaches the offline bundle to a release.
+GitHub Actions runs all of them on every push to `main`, and validates both cloud-init files against Rocky 9's cloud-init schema. A tag `v*` attaches the offline bundle to a release.
