@@ -12,6 +12,7 @@ The working application behind the Claims Desk architecture deck. An adjuster su
 | 6 | 10 | UAT copy by NCM Self-Service from a masked NDB clone | Planned |
 
 Design, API, data model and a demo run sheet: [`docs/STAGE1.md`](docs/STAGE1.md).
+Everything else the lab needs for the full demo (DNS, NTP, certificates, IP plan, registries, NKP, NAI, NC2): [`docs/LAB.md`](docs/LAB.md).
 
 ## Stage 1 at a glance
 
