@@ -4,5 +4,7 @@ __pycache__/
 dist/
 vendor/
 claims-desk.conf
+deploy/ssh/*
+!deploy/ssh/*.pub
 .pytest_cache/
 .DS_Store

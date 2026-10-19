@@ -16,10 +16,11 @@ manage_etc_hosts: true
 timezone: Australia/Sydney                  # EDIT if needed
 
 # The image's default user (rocky on Rocky Linux, cloud-user on RHEL) gets this key and sudo.
+# Lab key: deploy/ssh/claims-desk-lab.pub (private key on the admin laptop only).
 users:
   - default
 ssh_authorized_keys:
-  - ssh-ed25519 AAAA...replace-with-your-public-key... you@laptop   # EDIT
+  - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGfO43mMt4kOUNA2UA2fykY4gWVU3WyXK9WY+cw8WGIa claims-desk-lab (maksim.malygin@nutanix.com)
 ssh_pwauth: false
 # Console password for the default user (optional; hash with: openssl passwd -6):
 # chpasswd:

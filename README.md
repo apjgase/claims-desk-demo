@@ -72,9 +72,22 @@ In a Flow policy for `AppTier: Web`, the outbound rule to the database is the on
 - stops and masks firewalld
 - reboots once
 
-In Prism Central: **Create VM → Guest Customization → Cloud-init (Linux) → Custom Script**, and paste the file after editing the lines marked `EDIT` (host name, FQDN, SSH key). The VM needs dnf repository access during first boot. It is ready when `/var/lib/claims-desk/vm-ready` exists; first-boot output is in `/var/log/cloud-init-output.log`. With the packages already present, `install.sh` skips dnf, reports SELinux and firewalld as disabled, and needs no repository access.
+In Prism Central: **Create VM → Guest Customization → Cloud-init (Linux) → Custom Script**, and paste the file after editing the lines marked `EDIT` (host name, FQDN). The lab SSH key is already in it. The VM needs dnf repository access during first boot. It is ready when `/var/lib/claims-desk/vm-ready` exists; first-boot output is in `/var/log/cloud-init-output.log`. With the packages already present, `install.sh` skips dnf, reports SELinux and firewalld as disabled, and needs no repository access.
 
 Optionally, set `BUNDLE_URL` in the file to an internal address that serves the offline bundle; the VM then extracts it to `/opt/claims-desk-bundle`. The GitHub release needs a token, so for GitHub copy the bundle with `scp` (step 1).
+
+### Lab SSH key
+
+One key pair for every lab machine. The public key is [`deploy/ssh/claims-desk-lab.pub`](deploy/ssh/claims-desk-lab.pub). The private key is `~/.ssh/claims-desk-lab` on the admin laptop and is never committed.
+
+| Where | How |
+| :--- | :--- |
+| Portal VM | Already in `deploy/cloud-init/portal-vm.yaml`; log in as `rocky` |
+| NDB database server VMs | Paste the public key into the SSH public key field when provisioning the database server |
+| NKP clusters (later stages) | `--ssh-public-key-file deploy/ssh/claims-desk-lab.pub` |
+| Any other VM | Prism guest customization, or `ssh-copy-id -i ~/.ssh/claims-desk-lab.pub user@host` |
+
+On another admin machine, copy the private key to `~/.ssh/claims-desk-lab` (mode 600).
 
 ### 1. Get the bundle onto the VM
 
