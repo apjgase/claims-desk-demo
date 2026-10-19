@@ -1,3 +1,5 @@
+Stage 3 is in this tree, together with stage 1. `sudo ./update.sh --stage 1` is the portal. `sudo ./update.sh --stage 3`, run on the portal, installs the document service on the document VM over SSH: NFSv3 photo on submit, Objects packet when the claim is approved. Objects TLS is not verified. `install.sh` remains the stage 1 installer.
+
 Stage 1: the portal VM.
 
 - nginx (HTTPS 443), web tier, and middleware API as systemd services on Rocky Linux 9 / RHEL 9.

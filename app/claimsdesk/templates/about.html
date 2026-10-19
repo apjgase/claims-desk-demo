@@ -49,10 +49,45 @@
 <div class="banner error">{{ info.db.error }}</div>
 {% endif %}
 
+{% if info and info.documents and info.documents.enabled %}
+<h2>Document tier</h2>
+<div class="path">
+  <div class="hop">
+    <span class="badge b-vm">API</span>
+    <b>Middleware</b>
+    <code>{{ info.documents.url }}</code>
+  </div>
+  <div class="arrow">→</div>
+  <div class="hop {% if info.documents.status != 'ok' %}down{% endif %}">
+    <span class="badge b-vm">VM</span>
+    <b>Document VM</b>
+    {% if info.documents.host %}
+      <code>{{ info.documents.host.hostname }}</code>
+      <code>{{ info.documents.host.ip }} · :8090</code>
+    {% else %}<code>{{ info.documents.error or 'unreachable' }}</code>{% endif %}
+  </div>
+  <div class="arrow">→</div>
+  <div class="hop {% if not (info.documents.nfs and info.documents.nfs.mounted) %}down{% endif %}">
+    <span class="badge b-nfs">NFS</span>
+    <b>Files</b>
+    <code>{{ info.documents.nfs.export if info.documents.nfs else 'unknown' }}</code>
+    <code>NFSv3 · 2049</code>
+  </div>
+  <div class="arrow">→</div>
+  <div class="hop">
+    <span class="badge b-s3">S3</span>
+    <b>Objects</b>
+    <code>{{ info.documents.s3.endpoint if info.documents.s3 else 'unknown' }}</code>
+    <code>bucket {{ info.documents.s3.bucket if info.documents.s3 else '?' }} · WORM</code>
+  </div>
+</div>
+{% endif %}
+
 <h2>What to look for</h2>
 <ul class="notes">
   <li><b>Written by</b> on each claim records the host that inserted it. After a DR failover to NC2 the portal keeps its name; the address in the footer shows where it now runs.</li>
   <li><b>DB served by</b> is <code>inet_server_addr()</code>: the PostgreSQL node that answered. Behind HAProxy (stage 2) it changes when Patroni promotes a new primary.</li>
   <li>The web tier never opens a database connection. Only the middleware does, so moving the middleware into pods later is a configuration change.</li>
+  <li>From stage 3 the document VM writes the photo to Files when the claim is submitted, and the accepted packet to Objects when the claim is moved to <b>APPROVED</b>. The portal does not mount the share and does not hold the Objects keys.</li>
 </ul>
 {% endblock %}

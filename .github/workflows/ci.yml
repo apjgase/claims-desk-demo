@@ -24,7 +24,7 @@ jobs:
           python -m pytest -q -p no:cacheprovider tests
       - name: ShellCheck (including scripts embedded in cloud-init)
         run: |
-          shellcheck -x install.sh uninstall.sh deploy/claims-desk scripts/*.sh
+          shellcheck -x install.sh uninstall.sh update.sh deploy/claims-desk scripts/*.sh
           pip install -q pyyaml
           mkdir -p /tmp/embedded
           python - <<'PY'

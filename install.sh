@@ -3,6 +3,7 @@
 #
 #   sudo ./install.sh                          interactive; asks for the PostgreSQL details
 #   sudo ./install.sh --config claims-desk.conf   unattended (see claims-desk.conf.example)
+#   sudo ./update.sh --stage 3                 add the document VM, Files, and Objects
 #
 # Installs nginx (HTTPS 443, HTTP 80 redirects), the web tier (127.0.0.1:8080) and the
 # middleware API (127.0.0.1:8000) as systemd services, creates the application role,
@@ -322,6 +323,14 @@ else
   warn "health check failed: $(curl -sk https://127.0.0.1/healthz || echo 'no response')"
   warn "see: sudo claims-desk logs"
   exit 1
+fi
+
+if [ "${CLAIMS_UPDATE_FOLLOW:-}" = "1" ]; then
+  info "portal tier is in place"
+  if [ "${GENERATED_PW:-0}" -eq 1 ]; then
+    echo "  App password  generated; stored only in ${ETC}/api.json"
+  fi
+  exit 0
 fi
 
 IP="$(hostname -I 2>/dev/null | awk '{print $1}')"

@@ -6,14 +6,15 @@ import time
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
+from urllib.parse import quote
 
 import httpx
 from fastapi import FastAPI, Form, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import STAGE, __version__, config
+from . import __version__, config
 from .db import LOSS_TYPES, STATUSES
 
 HERE = Path(__file__).parent
@@ -63,6 +64,9 @@ def api(method: str, path: str, **kw) -> Tuple[Optional[Any], Optional[str], int
         detail = body or {}
         return None, "Database unavailable at {}: {}".format(
             detail.get("db_endpoint", "?"), detail.get("error", "no detail")), 503
+    if isinstance(body, dict) and body.get("documents"):
+        return None, "Document VM unavailable at {}: {}".format(
+            body.get("documents"), body.get("detail", "no detail")), r.status_code
     if r.status_code >= 400:
         return body, None, r.status_code
     return body, None, r.status_code
@@ -82,7 +86,7 @@ def render(request: Request, name: str, status_code: int = 200, **ctx) -> HTMLRe
     ctx.update(
         site_name=CFG["site_name"],
         environment=CFG["environment"],
-        stage=STAGE,
+        stage=config.stage_label(CFG),
         version=__version__,
         web=IDENT,
         api_url=CFG["api_url"],
@@ -114,20 +118,48 @@ def new_claim(request: Request):
     return render(request, "new.html", form={"loss_date": date.today().isoformat()}, errors={})
 
 
+def _field(form, name: str) -> str:
+    value = form.get(name)
+    if value is None or hasattr(value, "read"):
+        return ""
+    return str(value).strip()
+
+
 @app.post("/claims/new", response_class=HTMLResponse)
-def create_claim(request: Request,
-                 policy_number: str = Form(""), claimant_name: str = Form(""),
-                 contact_email: str = Form(""), loss_date: str = Form(""),
-                 loss_type: str = Form(""), amount: str = Form(""),
-                 description: str = Form(""), adjuster: str = Form("")):
+async def create_claim(request: Request):
+    incoming = await request.form()
     form = {
-        "policy_number": policy_number.strip(), "claimant_name": claimant_name.strip(),
-        "contact_email": contact_email.strip() or None, "loss_date": loss_date,
-        "loss_type": loss_type, "amount": amount.strip(), "description": description.strip(),
-        "adjuster": adjuster.strip() or None,
+        "policy_number": _field(incoming, "policy_number"),
+        "claimant_name": _field(incoming, "claimant_name"),
+        "contact_email": _field(incoming, "contact_email") or None,
+        "loss_date": _field(incoming, "loss_date"),
+        "loss_type": _field(incoming, "loss_type"),
+        "amount": _field(incoming, "amount"),
+        "description": _field(incoming, "description"),
+        "adjuster": _field(incoming, "adjuster") or None,
     }
+    upload = incoming.get("photo")
+    blob = b""
+    filename = ""
+    content_type = "application/octet-stream"
+    if upload is not None and hasattr(upload, "read"):
+        filename = getattr(upload, "filename", "") or ""
+        blob = await upload.read()
+        content_type = getattr(upload, "content_type", None) or content_type
     data, err, code = api("POST", "/api/v1/claims", json=form)
     if code == 201:
+        if filename and blob:
+            _pdata, perr, pcode = api(
+                "POST", "/api/v1/claims/{}/photo".format(data["claim_number"]),
+                files={"photo": (filename, blob, content_type)})
+            if perr or pcode >= 400:
+                detail = ""
+                if isinstance(_pdata, dict) and isinstance(_pdata.get("detail"), str):
+                    detail = _pdata["detail"]
+                msg = (perr or detail or "Photo was not stored ({})".format(pcode))[:180]
+                return RedirectResponse(
+                    "/claims/{}?created=1&photo_error={}".format(data["claim_number"], quote(msg)),
+                    status_code=303)
         return RedirectResponse("/claims/{}?created=1".format(data["claim_number"]),
                                 status_code=303)
     errors: Dict[str, str] = {}
@@ -140,12 +172,24 @@ def create_claim(request: Request,
 
 
 @app.get("/claims/{claim_number}", response_class=HTMLResponse)
-def claim_detail(request: Request, claim_number: str, created: int = 0):
+def claim_detail(request: Request, claim_number: str, created: int = 0, photo_error: str = ""):
     data, err, code = api("GET", "/api/v1/claims/{}".format(claim_number))
     if code == 404:
         return render(request, "claim.html", status_code=404, claim=None,
                       error="Claim {} not found".format(claim_number))
-    return render(request, "claim.html", claim=data, error=err, created=created)
+    return render(request, "claim.html", claim=data, error=photo_error or err, created=created)
+
+
+@app.get("/claims/{claim_number}/photo")
+def claim_photo(claim_number: str):
+    try:
+        response = client.request("GET", "/api/v1/claims/{}/photo".format(claim_number))
+    except httpx.HTTPError:
+        return HTMLResponse("Middleware API unreachable", status_code=502)
+    if response.status_code >= 400:
+        return HTMLResponse("Photo not available", status_code=response.status_code)
+    return Response(content=response.content,
+                    media_type=response.headers.get("content-type", "application/octet-stream"))
 
 
 @app.post("/claims/{claim_number}/status")

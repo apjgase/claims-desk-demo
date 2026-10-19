@@ -1,12 +1,12 @@
 # Claims Desk demo
 
-The working application behind the Claims Desk architecture deck. An adjuster submits a claim to a portal, and the claim lands in PostgreSQL. Each stage of the deck adds one piece to the same application. This repository holds the software and the scripts that install it. You provision the infrastructure (VMs, NDB, Flow, NC2); `install.sh` turns a plain Rocky Linux 9 VM into the portal.
+The working application behind the Claims Desk architecture deck. An adjuster submits a claim to a portal, and the claim lands in PostgreSQL. Each stage of the deck adds one piece to the same application. This repository holds the software and the scripts that install it. You provision the infrastructure (VMs, NDB, Files, Objects, Flow, NC2). `update.sh` turns a plain Rocky Linux 9 VM into the portal, and the same script adds later stages. `install.sh` is stage 1.
 
 | Stage | Deck slide | What runs | Status |
 | :--- | :--- | :--- | :--- |
-| **1** | **4–5** | **Portal VM: nginx, web tier, middleware API. PostgreSQL provisioned by you (NDB).** | **This release** |
+| **1** | **4–5** | **Portal VM: nginx, web tier, middleware API. PostgreSQL provisioned by you (NDB).** | **In this tree** |
 | 2 | 5 | Same app on NDB PostgreSQL HA: point it at HAProxy port 5000 | Configuration only |
-| 3 | 6 | Document VM writes the photo to Nutanix Files and the packet to Objects WORM | Planned |
+| **3** | **6** | **Document VM writes the photo to Nutanix Files (NFSv3) and the accepted packet to Objects.** | **In this tree** |
 | 4 | 7 | API pods on NKP (Flow CNI) take the middleware role; portal to database becomes a Flow drop | Planned |
 | 5 | 8 | Chat pods and a NAI endpoint on the same NKP cluster | Planned |
 | 6 | 10 | UAT copy by NCM Self-Service from a masked NDB clone | Planned |
@@ -94,15 +94,15 @@ On another admin machine, copy the private key to `~/.ssh/claims-desk-lab` (mode
 
 ### 1. Get the bundle onto the VM
 
-With the portal cloud-init, the VM has already downloaded and extracted it to `/opt/claims-desk-bundle/claims-desk-demo-0.1.0` (re-run with `sudo claims-desk-fetch-bundle`). Otherwise, on the VM:
+With the portal cloud-init, the VM has already downloaded and extracted it to `/opt/claims-desk-bundle/claims-desk-demo-0.2.0` (re-run with `sudo claims-desk-fetch-bundle`). Otherwise, on the VM:
 
-**Offline bundle (recommended).** Includes the Python wheels for Rocky 9, so the VM needs only its dnf repositories:
+**Offline bundle (recommended).** Includes the Python wheels for Rocky 9, so the VM needs only its dnf repositories. The asset is attached when `v0.2.0` is tagged; until then copy this directory to the VM.
 
 ```bash
-REL=https://github.com/apjgase/claims-desk-demo/releases/download/v0.1.0
-curl -fLO $REL/claims-desk-demo-0.1.0.tar.gz -fLO $REL/claims-desk-demo-0.1.0.tar.gz.sha256
-sha256sum -c claims-desk-demo-0.1.0.tar.gz.sha256
-tar -xzf claims-desk-demo-0.1.0.tar.gz && cd claims-desk-demo-0.1.0
+REL=https://github.com/apjgase/claims-desk-demo/releases/download/v0.2.0
+curl -fLO $REL/claims-desk-demo-0.2.0.tar.gz -fLO $REL/claims-desk-demo-0.2.0.tar.gz.sha256
+sha256sum -c claims-desk-demo-0.2.0.tar.gz.sha256
+tar -xzf claims-desk-demo-0.2.0.tar.gz && cd claims-desk-demo-0.2.0
 ```
 
 Without internet on the VM, download it elsewhere (GitHub, **Releases**) and copy it with `scp`.
@@ -112,8 +112,10 @@ Without internet on the VM, download it elsewhere (GitHub, **Releases**) and cop
 ### 2. Run the installer
 
 ```bash
-sudo ./install.sh
+sudo ./update.sh --stage 1
 ```
+
+`sudo ./install.sh` does the same thing. Stage 3 is `sudo ./update.sh --stage 3` from this same directory, after the portal is up. See [Stage 3](#stage-3-document-vm-files-objects) below.
 
 It asks:
 
@@ -167,9 +169,48 @@ sudo claims-desk logs 200   # nginx, claims-web, claims-api
 | `/etc/nginx/nginx.conf` | Portal config; the original is `nginx.conf.claims-desk.orig` |
 | `/etc/pki/tls/certs/claims-desk.crt`, `/etc/pki/tls/private/claims-desk.key` | Certificate. Replace with your own and `systemctl reload nginx`, or set `TLS_CERT`/`TLS_KEY` |
 
-**Upgrade:** copy the new bundle and run `sudo ./install.sh` again. Code and packages are replaced; the database settings and data are kept.
-**Point at another database** (for example HAProxy 5000 for stage 2): `sudo ./install.sh --reconfigure`.
-**Remove:** `sudo ./uninstall.sh`. The database is left alone.
+**Upgrade:** from the same extracted bundle, run `sudo ./update.sh --stage 1` again (or `sudo ./install.sh`). Code and packages are replaced; the database settings and data are kept.
+**Point at another database** (for example HAProxy 5000 for stage 2): `sudo ./update.sh --stage 1 --reconfigure`.
+**Add Files and Objects:** `sudo ./update.sh --stage 3`. Running it again upgrades the document VM and keeps the settings saved on the portal.
+**Remove the portal:** `sudo ./uninstall.sh`. The database is left alone. The document VM is left alone too; its `claims-docs` service keeps running.
+
+## Stage 3: document VM, Files, Objects
+
+One run, on the portal VM. It installs the document service on the document VM over SSH. The browser still talks only to the portal. The portal calls the document VM on TCP 8090. The document VM mounts the share and holds the Objects keys.
+
+### What you provision
+
+| Item | Requirement |
+| :--- | :--- |
+| Document VM | Rocky Linux 9, prepared with [`deploy/cloud-init/document-vm.yaml`](deploy/cloud-init/document-vm.yaml). Hostname in that file is `docvm`. SSH from the portal must work (TCP 22). Default login is `root`; the lab root password is in the cloud-init, or use the lab key |
+| Files | NFSv3 export the document VM can mount by IP, for example `10.10.140.11:/claims-docs`. Read-write for that VM. The `claimsdesk` user on the document VM must be able to create a file (numeric uid, NFSv3) |
+| Objects | Path-style S3 endpoint, bucket (default `claims`), access key and secret key. TLS is not verified. A bucket default retention is what makes the packet WORM; the app PUTs the object |
+| Flow | Portal to document VM TCP 8090 and TCP 22. Document VM to Files TCP 2049. Document VM to Objects TCP 443 |
+
+### Run it
+
+```bash
+sudo ./update.sh --stage 3
+```
+
+It asks for the document VM IP, the SSH user (default `root`) and an optional private key, the NFS export (`IP:/path`), the Objects URL, the bucket, and the keys. If key login fails it asks for the SSH password. `sshpass` is installed only in that case.
+
+Unattended: add the `DOC_*`, `NFS_*`, and `S3_*` lines from [`claims-desk.conf.example`](claims-desk.conf.example), then `sudo ./update.sh --stage 3 --config claims-desk.conf -y`. Delete that file afterwards. A root-only copy used for the next run is `/root/.claims-desk-stage3` on the portal. The portal application cannot read it. The keys the service uses are `/etc/claims-desk/docs.json` on the document VM.
+
+Running `sudo ./update.sh --stage 3` again upgrades both VMs and reuses those saved settings. `--reconfigure` asks again.
+
+### What the adjuster sees
+
+- **Submit.** The photo field is optional (JPEG, PNG, GIF, or WebP, up to 10 MB). The document VM writes `{mount}/{claim number}/photo.jpg` (or png, gif, webp). The claim page shows the picture and the path. The portal proxies the file; the browser does not open the document VM or the share.
+- **Approve.** Moving the claim to `APPROVED` writes `{claim number}/packet.json` into the bucket and stores that URL on the claim. Other status changes do not touch Objects. A second approval does not write the object again.
+- Sample claims from `claims-desk seed` have neither a photo nor a packet.
+
+The architecture page (`/about`) shows the document VM, the export, and the Objects endpoint once stage 3 is in place.
+
+```bash
+curl -sS http://<document-vm>:8090/health
+sudo claims-desk status          # on the portal; includes the document health check
+```
 
 ## Troubleshooting
 
@@ -185,6 +226,11 @@ sudo claims-desk logs 200   # nginx, claims-web, claims-api
 | Page shows **Database unavailable** | The middleware cannot reach PostgreSQL right now (outage, failover, Flow drop). It reconnects on its own. |
 | Page shows **Middleware API unreachable** | `claims-api` is down: `sudo claims-desk logs`. |
 | 502 Bad Gateway | `claims-web` is down, or SELinux blocks nginx: `getsebool httpd_can_network_connect` must be `on`. |
+| `cannot log in to root@…` | The portal has no key that the document VM accepts. Copy the lab private key to `/root/.ssh/claims-desk-lab` (mode 600), or enter the document VM's root password when asked. |
+| `could not mount` the NFS export | From the document VM, TCP 2049 to the Files IP, and the export path. The script mounts NFSv3 (`vers=3,proto=tcp`) and gives up after 30 seconds. |
+| `cannot create a file` on the share | NFSv3 sends the numeric uid of `claimsdesk`. The export must allow that uid to write. |
+| `cannot reach bucket` | Endpoint URL, bucket name, or keys. TLS errors are not the cause: verification is off. The key needs to be able to read the bucket and put objects. |
+| Photo or packet says the document VM is unavailable | Portal to document VM TCP 8090. `curl -sS http://<document-vm>:8090/health` from the portal. |
 
 ## Development
 
@@ -195,4 +241,4 @@ bash scripts/e2e-rocky9.sh      # install.sh on Rocky 9 + systemd + PostgreSQL 1
 bash scripts/test-lab-services.sh   # lab01 cloud-init on Rocky 9 in Docker: DNS, NTP, CA trust, tools
 ```
 
-GitHub Actions runs all of them on every push to `main`, and validates both cloud-init files against Rocky 9's cloud-init schema. A tag `v*` attaches the offline bundle to a release.
+GitHub Actions runs all of them on every push to `main`, and validates the cloud-init files against Rocky 9's cloud-init schema. A tag `v*` attaches the offline bundle to a release.

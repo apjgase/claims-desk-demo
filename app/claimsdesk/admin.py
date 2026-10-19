@@ -211,8 +211,9 @@ def info(cfg) -> None:
 
 def write_config(cfg, api_path: str, web_path: str) -> None:
     api_keys = ["db_host", "db_port", "db_name", "db_user", "db_password", "db_sslmode",
-                "db_schema", "db_connect_timeout", "db_pool_max"]
-    web_keys = ["api_url", "api_timeout", "site_name", "environment"]
+                "db_schema", "db_connect_timeout", "db_pool_max", "stage", "docs_url",
+                "docs_timeout"]
+    web_keys = ["api_url", "api_timeout", "site_name", "environment", "stage"]
     for path, keys in ((api_path, api_keys), (web_path, web_keys)):
         data = {k: cfg[k] for k in keys}
         fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o640)

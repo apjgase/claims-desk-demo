@@ -28,3 +28,20 @@ TLS_KEY=''               # optional PEM private key
 SITE_NAME='Claims Desk'
 ENVIRONMENT='Prod'       # shown in the header: Prod or UAT
 SEED_COUNT=12            # sample claims loaded into an empty table; 0 = none
+
+# Stage 3, used by: sudo ./update.sh --stage 3 --config claims-desk.conf -y
+# The script runs on the portal VM and installs the document service over SSH.
+# NFSv3, by IP. Objects TLS is not verified. Delete this file after the run:
+# the Objects keys are kept on the document VM, and a root-only copy for the
+# next update is /root/.claims-desk-stage3 on the portal.
+DOC_HOST=''              # document VM IPv4 address
+DOC_SSH_USER='root'      # rocky works when that account has passwordless sudo
+DOC_SSH_KEY=''           # empty tries the agent, then /root/.ssh/claims-desk-lab
+# DOC_SSH_PASSWORD=''    # used when no key works; prefer a key
+NFS_EXPORT=''            # for example 10.10.140.11:/claims-docs
+NFS_MOUNT='/mnt/claims-docs'
+S3_ENDPOINT=''           # https://objects-ip-or-name
+S3_BUCKET='claims'
+S3_ACCESS_KEY=''
+S3_SECRET_KEY=''
+S3_REGION='us-east-1'

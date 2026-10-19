@@ -15,8 +15,15 @@
     <dt>Amount</dt><dd class="mono">{{ claim.amount|money }}</dd>
     <dt>Adjuster</dt><dd>{{ claim.adjuster or '—' }}</dd>
     <dt>Description</dt><dd class="pre">{{ claim.description }}</dd>
-    <dt>Photo</dt><dd class="dim">{{ claim.photo_path or 'none (Nutanix Files, stage 3)' }}</dd>
-    <dt>Packet</dt><dd class="dim">{{ claim.packet_url or 'none (Objects WORM, stage 3)' }}</dd>
+    <dt>Photo</dt>
+    <dd>
+      {% if claim.photo_path %}
+        <img class="photo" src="/claims/{{ claim.claim_number }}/photo" alt="Photo for {{ claim.claim_number }}">
+        <code>{{ claim.photo_path }}</code>
+      {% else %}<span class="dim">none (Nutanix Files, stage 3)</span>{% endif %}
+    </dd>
+    <dt>Packet</dt>
+    <dd>{% if claim.packet_url %}<code>{{ claim.packet_url }}</code>{% else %}<span class="dim">none (Objects WORM, when approved)</span>{% endif %}</dd>
     <dt>Written by</dt><dd class="mono">{{ claim.created_by_host }}</dd>
     <dt>Submitted</dt><dd class="mono">{{ claim.created_at|when }}</dd>
     <dt>Updated</dt><dd class="mono">{{ claim.updated_at|when }}</dd>

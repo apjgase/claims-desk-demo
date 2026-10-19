@@ -91,6 +91,7 @@ def test_api_flow(api_client):
     assert api_client.get("/api/v1/claims/CLM-000006").json()["amount"] in (1234.5, "1234.50")
     r = api_client.patch("/api/v1/claims/CLM-000006", json={"status": "APPROVED"})
     assert r.json()["status"] == "APPROVED"
+    assert r.json()["packet_url"] is None
     assert any(c["claim_number"] == "CLM-000006"
                for c in api_client.get("/api/v1/claims", params={"status": "APPROVED"}).json())
     assert api_client.get("/api/v1/claims", params={"q": "test person"}).json()[0]["claim_number"] == "CLM-000006"
@@ -161,6 +162,58 @@ def test_api_when_db_down(database):
             assert c.get("/api/v1/info").json()["db"]["status"] == "unavailable"
     finally:
         api.pool = saved
+
+
+def test_photo_and_packet(api_client, monkeypatch):
+    from claimsdesk import api
+    calls = {"photo": 0, "packet": 0}
+
+    def fake_photo(_cfg, claim_number, _filename, content, _content_type):
+        calls["photo"] += 1
+        calls["bytes"] = content
+        return "/mnt/claims-docs/{}/photo.png".format(claim_number)
+
+    seen = {}
+
+    def fake_get(_cfg, claim_number):
+        seen["claim"] = claim_number
+        return calls["bytes"], "image/png"
+
+    def fake_packet(_cfg, claim):
+        calls["packet"] += 1
+        return "https://objects.example/claims/{}/packet.json".format(claim["claim_number"])
+
+    monkeypatch.setattr(api, "put_photo", fake_photo)
+    monkeypatch.setattr(api, "get_photo", fake_get)
+    monkeypatch.setattr(api, "put_packet", fake_packet)
+    api.CFG["docs_url"] = "http://10.0.0.8:8090"
+    api.CFG["docs_timeout"] = 5
+    try:
+        new = {"policy_number": "POL-90001", "claimant_name": "Photo Person",
+               "loss_date": "2026-10-02", "loss_type": "Auto", "amount": "10.00",
+               "description": "Dent"}
+        created = api_client.post("/api/v1/claims", json=new)
+        assert created.status_code == 201, created.text
+        number = created.json()["claim_number"]
+        png = b"\x89PNG\r\n\x1a\n" + b"x" * 8
+        stored = api_client.post("/api/v1/claims/{}/photo".format(number),
+                                 files={"photo": ("damage.png", png, "image/png")})
+        assert stored.status_code == 200, stored.text
+        assert stored.json()["photo_path"].endswith("/photo.png")
+        fetched = api_client.get("/api/v1/claims/{}/photo".format(number))
+        assert fetched.status_code == 200 and fetched.content == png
+        assert seen["claim"] == number
+
+        reviewed = api_client.patch("/api/v1/claims/{}".format(number), json={"status": "IN_REVIEW"})
+        assert reviewed.json()["packet_url"] is None and calls["packet"] == 0
+        approved = api_client.patch("/api/v1/claims/{}".format(number), json={"status": "APPROVED"})
+        assert approved.json()["packet_url"].endswith("/packet.json")
+        assert calls["packet"] == 1
+        again = api_client.patch("/api/v1/claims/{}".format(number), json={"status": "APPROVED"})
+        assert again.json()["packet_url"] == approved.json()["packet_url"]
+        assert calls["packet"] == 1
+    finally:
+        api.CFG["docs_url"] = ""
 
 
 def test_reset(database):

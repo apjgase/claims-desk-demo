@@ -96,11 +96,25 @@ def insert_claim(conn, data: Dict[str, Any], host: str):
     return conn.execute(query, [data.get(c) for c in cols] + [host]).fetchone()
 
 
-def set_status(conn, claim_number: str, status: str):
+def set_status(conn, claim_number: str, status: str, packet_url: Optional[str] = None):
+    if packet_url is None:
+        return conn.execute(
+            "UPDATE claims SET status = %s, updated_at = now() WHERE claim_number = %s "
+            "RETURNING {}".format(CLAIM_COLUMNS),
+            [status, claim_number],
+        ).fetchone()
     return conn.execute(
-        "UPDATE claims SET status = %s, updated_at = now() WHERE claim_number = %s "
+        "UPDATE claims SET status = %s, packet_url = %s, updated_at = now() "
+        "WHERE claim_number = %s RETURNING {}".format(CLAIM_COLUMNS),
+        [status, packet_url, claim_number],
+    ).fetchone()
+
+
+def set_photo_path(conn, claim_number: str, photo_path: str):
+    return conn.execute(
+        "UPDATE claims SET photo_path = %s, updated_at = now() WHERE claim_number = %s "
         "RETURNING {}".format(CLAIM_COLUMNS),
-        [status, claim_number],
+        [photo_path, claim_number],
     ).fetchone()
 
 

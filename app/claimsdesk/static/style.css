@@ -97,6 +97,9 @@ table.claims { width: 100%; border-collapse: collapse; background: var(--panel);
          align-self: flex-start; color: #fff; }
 .b-vm { background: var(--purple); }
 .b-db { background: var(--azure); }
+.b-nfs { background: var(--lime); color: #141417; }
+.b-s3 { background: var(--green); }
+.photo { max-width: 420px; border-radius: 8px; border: 1px solid var(--edge); display: block; margin: 0.3rem 0; }
 .notes li { margin-bottom: 0.5rem; color: var(--dim); }
 .notes b { color: var(--text); }
 

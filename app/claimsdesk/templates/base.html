@@ -32,6 +32,13 @@
     {% else %}
       <span class="tier down"><b>DB</b> {{ info.db_endpoint.host }}:{{ info.db_endpoint.port }} · unavailable</span>
     {% endif %}
+    {% if info.documents and info.documents.enabled %}
+      {% if info.documents.status == 'ok' and info.documents.host %}
+        <span class="tier"><b>DOCS</b> {{ info.documents.host.hostname }} · {{ info.documents.host.ip }}</span>
+      {% else %}
+        <span class="tier down"><b>DOCS</b> {{ info.documents.url }} · unavailable</span>
+      {% endif %}
+    {% endif %}
   {% else %}
     <span class="tier down"><b>API</b> {{ api_url }} · unreachable</span>
   {% endif %}

@@ -95,5 +95,5 @@ Before the session: `sudo claims-desk reset` and `sudo claims-desk seed 12` give
 ## Not in stage 1
 
 - Authentication. The portal is open to anyone who can reach it: demo only, keep it inside the VPC.
-- Photo upload and the claim packet (stage 3).
+- Photo upload and the accepted packet. Those are stage 3: `sudo ./update.sh --stage 3` (see the README).
 - Multiple portal VMs behind a load balancer. One VM, protected by Nutanix DR.

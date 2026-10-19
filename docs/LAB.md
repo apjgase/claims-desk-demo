@@ -174,7 +174,8 @@ Licences have to cover: Flow Network Security and Flow Virtual Networking (VPC, 
 | Portal cloud-init with NTP from `lab01` and lab CA trust | 1 | done |
 | `lab01` cloud-init: DNS, NTP, jump host tools | all | done |
 | Lab CA script and certificates | all | done |
-| Document-tier code: NFS photo writes, S3 path-style client for the WORM packet, settings for both | 3 | next |
+| Document VM cloud-init (`deploy/cloud-init/document-vm.yaml`) | 3 | done |
+| Document-tier code: NFS photo writes, S3 path-style client for the WORM packet, `update.sh --stage 3` | 3 | done |
 | Container image for the middleware (Dockerfile, CI build, push to GHCR) | 4 | |
 | Helm chart: API deployment, Service, Ingress, ConfigMap and Secret, probes, CA bundle, NDK Application | 4 | |
 | Chat service with a client for the external inference endpoint | 5 | |

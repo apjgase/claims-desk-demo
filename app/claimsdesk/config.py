@@ -28,10 +28,43 @@ DEFAULTS: Dict[str, Any] = {
     "api_timeout": 15.0,
     "site_name": "Claims Desk",
     "environment": "Prod",
+    # 1 portal, 3 document VM. Empty docs_url keeps stage 1 behaviour.
+    "stage": 1,
+    "docs_url": "",
+    "docs_timeout": 60.0,
+    # Document VM only. The portal leaves these empty.
+    "nfs_export": "",
+    "nfs_mount": "/mnt/claims-docs",
+    "s3_endpoint": "",
+    "s3_bucket": "claims",
+    "s3_access_key": "",
+    "s3_secret_key": "",
+    "s3_region": "us-east-1",
+    "s3_verify_tls": False,
 }
 
-_INT = {"db_port", "db_connect_timeout", "db_pool_max"}
-_FLOAT = {"api_timeout"}
+_INT = {"db_port", "db_connect_timeout", "db_pool_max", "stage"}
+_FLOAT = {"api_timeout", "docs_timeout"}
+_BOOL = {"s3_verify_tls"}
+
+
+def _as_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def stage_label(cfg: Dict[str, Any]) -> str:
+    labels = {
+        1: "Stage 1 - Portal VM",
+        2: "Stage 2 - PostgreSQL HA",
+        3: "Stage 3 - Document VM",
+    }
+    try:
+        number = int(cfg.get("stage") or 1)
+    except (TypeError, ValueError):
+        return "Stage {}".format(cfg.get("stage"))
+    return labels.get(number, "Stage {}".format(number))
 
 
 def load() -> Dict[str, Any]:
@@ -48,6 +81,8 @@ def load() -> Dict[str, Any]:
         cfg[key] = int(cfg[key])
     for key in _FLOAT:
         cfg[key] = float(cfg[key])
+    for key in _BOOL:
+        cfg[key] = _as_bool(cfg[key])
     return cfg
 
 

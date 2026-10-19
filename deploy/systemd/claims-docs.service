@@ -1,0 +1,23 @@
+[Unit]
+Description=Claims Desk document service (Files and Objects)
+After=network-online.target remote-fs.target
+Wants=network-online.target
+RequiresMountsFor=@NFS_MOUNT@
+
+[Service]
+User=claimsdesk
+Group=claimsdesk
+Environment=CLAIMS_CONFIG=/etc/claims-desk/docs.json
+Environment=PYTHONDONTWRITEBYTECODE=1
+WorkingDirectory=/opt/claims-desk/app
+ExecStart=/opt/claims-desk/venv/bin/uvicorn claimsdesk.docs:app --host 0.0.0.0 --port 8090 --workers 1 --no-server-header
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=yes
+ProtectHome=yes
+PrivateTmp=yes
+# ProtectSystem is left off. A strict filesystem namespace blocks writes to an
+# NFSv3 mount even with ReadWritePaths. The process still runs as claimsdesk.
+
+[Install]
+WantedBy=multi-user.target

@@ -32,6 +32,12 @@ case "${1:-}" in
     printf '%-12s ' "health"
     curl -sk --max-time 10 https://127.0.0.1/healthz || echo "no response"
     echo
+    docs="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("docs_url",""))' /etc/claims-desk/api.json 2>/dev/null || true)"
+    if [ -n "$docs" ]; then
+      printf '%-12s ' "documents"
+      curl -fsS --max-time 5 "${docs%/}/health" || echo "no response"
+      echo
+    fi
     ;;
   check) admin check ;;
   info) admin info ;;

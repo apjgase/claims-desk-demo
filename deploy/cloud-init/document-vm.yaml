@@ -1,0 +1,130 @@
+#cloud-config
+# Claims Desk document VM: Rocky Linux 9 (or RHEL 9) cloud image on AHV.
+#
+# Prism Central: Create VM > Guest Customization > Cloud-init (Linux) > Custom Script,
+# paste this file. Edit the values marked EDIT. The VM updates itself, installs
+# nfs-utils and Python, disables firewalld and SELinux, and reboots once.
+# Do not run install.sh here. On the portal VM, run sudo ./update.sh --stage 3.
+# That logs in over SSH and installs the document service (TCP 8090).
+#
+# Progress on the VM: sudo tail -f /var/log/cloud-init-output.log
+# Done when the VM has rebooted and /var/lib/claims-desk/vm-ready exists.
+
+hostname: docvm                             # EDIT
+fqdn: docvm.claims.internal                 # EDIT
+prefer_fqdn_over_hostname: true
+manage_etc_hosts: true
+timezone: Australia/Sydney                  # EDIT if needed
+
+# DNS comes from the subnet: set lab01 as the DNS server and claims.internal as the search
+# domain in the IPAM settings of the VPC subnet. Time comes from lab01.
+ntp:
+  enabled: true
+  ntp_client: chrony
+  servers:
+    - 10.10.110.50                          # EDIT: lab01
+  pools:
+    - 2.rocky.pool.ntp.org                  # fallback
+
+# Lab CA (deploy/pki/claims-internal-ca.crt), so this VM trusts lab certificates.
+ca_certs:
+  trusted:
+    - |
+      -----BEGIN CERTIFICATE-----
+      MIIEozCCAwugAwIBAgIJAL7M+Gf8+rkuMA0GCSqGSIb3DQEBCwUAMEkxGDAWBgNV
+      BAoMD0NsYWltcyBEZXNrIGxhYjEtMCsGA1UEAwwkQ2xhaW1zIERlc2sgbGFiIENB
+      IChjbGFpbXMuaW50ZXJuYWwpMB4XDTI2MTAxOTAxMzIyOVoXDTM2MTAxNjAxMzIy
+      OVowSTEYMBYGA1UECgwPQ2xhaW1zIERlc2sgbGFiMS0wKwYDVQQDDCRDbGFpbXMg
+      RGVzayBsYWIgQ0EgKGNsYWltcy5pbnRlcm5hbCkwggGiMA0GCSqGSIb3DQEBAQUA
+      A4IBjwAwggGKAoIBgQDaolVQAO4fKGggUmkNb66HiNjKDAZTr5vZcPMc+7mC3w01
+      8niH+WX17LOqsvC66sFDfQoIYHQK5CZzEM2iJSqiEHdKyY4Dsuf9oRQmH7eqwE31
+      TCzFU/hchLpOY+EVXMr5VgRWQ90ZPYNzB3wGAVWn+8pY7S78ouUu8R4iEwzpESpP
+      gT8iMpAdMyMMgKeOGisI4IQ4LQdSSVt4S+fgwdvDju7BgXCBW7/Fmi/PLwXIMDB4
+      lZAlHHtxgAVd4DaEBmgOZleuGyjsKhd8+M/Vqp91DBGgxCA6/QGBpMeJAmay9wmz
+      glW4z6mxdiakbSRMOLOdaO3x81j5gRuJO4nmgtKvKzxi3K1tsDWi95RK3WvoV1Tm
+      zWAGaFZYaFGOCCaZWJSchyxpEg8XPg11IlIm2muMA95rKUnFlKIQXPZbdI3Q1Qvd
+      eRFBhCThy2wxhV4oFwaDYdL70FAR1eSHrlDZpNdLtrG1E4Rf/3LpEruoIw2z/EON
+      24xfesbWCLOALkyB+AkCAwEAAaOBjTCBijASBgNVHRMBAf8ECDAGAQH/AgEAMA4G
+      A1UdDwEB/wQEAwIBBjAdBgNVHQ4EFgQUf0inlk7PCoxoHCWsrn7nMDRlb3YwRQYD
+      VR0eAQH/BDswOaA3MBGCD2NsYWltcy5pbnRlcm5hbDAKhwgKAAAA/wAAADAKhwis
+      EAAA//AAADAKhwjAqAAA//8AADANBgkqhkiG9w0BAQsFAAOCAYEAaVOW56C9loHq
+      jTnC7nCyuccG/tc+TohKr7kgp2XalFYU1FzQFHpb0yEcLxOkjJbT49lPgKslg1DK
+      W6yFxWJNjZaU/FRnPoIuKkDuYLn2rxCQ4IyZd48CLZdKHmefNxV/jiRjx3o/4d6R
+      Y1FvnnY3gGggfYz0wyyQdZ/8rZkFD6XLkpMSeNcXpeDIS/vYx6dqE1pqcv7hk+YO
+      kepDgacldY9HPxUr3t8DvxliHknsOgJtTO/U+gulOGis8I+NhD8AEMQEwHNybApe
+      BOwpwZ/YyF14VhZPWKhT+ugfjIrILp88oHLQQqaBuG/AFcBBkRNOSmL5RA4TKaK0
+      Fu2TN2gYfy57edsXbenoOqGtZt+43P/xmPJ95jxOrXPp84MkQT9zTrhTMK5KO2nz
+      C8SqZ0iz3Mn5fJQIJgLCY7G3Vrre8HPawLOReB+SuMoWJlJN4ctjr9D7y/IvqhD+
+      L2jIOZXDmYKlUmFGfd2p2qlemO/UXFKQ2b+0sdUTS5/IOLqGXLvd
+      -----END CERTIFICATE-----
+
+# SSH: the lab key works for the default user (rocky on Rocky Linux, cloud-user on RHEL)
+# and for root. Password logins are on, root included. Lab only.
+# Lab key: deploy/ssh/claims-desk-lab.pub (private key on the admin laptop only).
+users:
+  - default
+ssh_authorized_keys:
+  - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGfO43mMt4kOUNA2UA2fykY4gWVU3WyXK9WY+cw8WGIa claims-desk-lab (maksim.malygin@nutanix.com)
+disable_root: false
+ssh_pwauth: true
+
+# Root password, SHA-512 crypt. New hash: openssl passwd -6 (on Linux)
+chpasswd:
+  expire: false
+  users:
+    - name: root
+      password: "$6$w/K1REnMsGO1qqc/$kd9P7P.wpEhKGjFrh/o/nGSiZg8NbYDSCLq.Q0NeJvTlwPEHzcHETdMwABQVPYVufA3HVLA68vobrrRTvRf2N/"
+      type: hash
+
+package_update: true
+package_upgrade: true
+packages:
+  # Used by update.sh --stage 3 when it installs the document service over SSH.
+  - python3.11
+  - python3.11-pip
+  - nfs-utils           # NFSv3 client, mount by Files IP
+  - openssl
+  - tar
+  # Troubleshooting
+  - nmap-ncat           # nc -vz <files-ip> 2049
+  - bind-utils          # dig, nslookup
+  - jq
+  - chrony
+  - git
+  - rsync
+  - vim-enhanced
+
+write_files:
+  # sshd reads drop-ins in name order and keeps the first value, so 01- overrides the
+  # image's prohibit-password default for root.
+  - path: /etc/ssh/sshd_config.d/01-claims-desk-lab.conf
+    permissions: "0600"
+    content: |
+      PermitRootLogin yes
+      PasswordAuthentication yes
+  - path: /etc/profile.d/claims-desk.sh
+    permissions: "0644"
+    content: |
+      # Claims Desk document VM. The portal installs claims-docs over SSH.
+      alias doclog='sudo journalctl -u claims-docs -f'
+
+runcmd:
+  # SELinux: off now, and off after the reboot. On RHEL 9 the config file alone leaves
+  # SELinux loaded without a policy; the selinux=0 kernel argument disables it fully.
+  - [sh, -c, "setenforce 0 || true"]
+  - [sed, -i, "s/^SELINUX=.*/SELINUX=disabled/", /etc/selinux/config]
+  - [grubby, --update-kernel, ALL, --args, selinux=0]
+  # Firewall: stop and mask firewalld (cloud images may not ship it; both steps tolerate that).
+  - [sh, -c, "systemctl disable --now firewalld 2>/dev/null || true"]
+  - [systemctl, mask, firewalld]
+  - [sh, -c, "sshd -t && systemctl restart sshd"]
+  - [mkdir, -p, /var/lib/claims-desk]
+  - [sh, -c, "date -Is > /var/lib/claims-desk/vm-ready"]
+
+# Reboot once, to load the updated kernel and boot with selinux=0.
+power_state:
+  mode: reboot
+  delay: now
+  message: "Claims Desk document VM prepared; rebooting"
+  timeout: 60
+  condition: true

@@ -18,6 +18,12 @@ if [ -f "$ETC/api.json" ]; then
   DB_LINE="$(python3 -c 'import json,sys; c=json.load(open(sys.argv[1])); print("{db_host}:{db_port} database {db_name}, role {db_user}".format(**c))' "$ETC/api.json" 2>/dev/null || true)"
 fi
 
+if [ -f /root/.claims-desk-stage3 ]; then
+  doc_host="$(sed -n "s/^DOC_HOST=//p" /root/.claims-desk-stage3 | tr -d "'\"")"
+  echo "Document VM ${doc_host:-on the saved address} was not modified. claims-docs is still running there."
+  rm -f /root/.claims-desk-stage3
+fi
+
 systemctl disable --now claims-web claims-api 2>/dev/null || true
 rm -f /etc/systemd/system/claims-web.service /etc/systemd/system/claims-api.service
 systemctl daemon-reload

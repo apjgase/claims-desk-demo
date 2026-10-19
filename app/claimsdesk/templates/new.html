@@ -2,7 +2,7 @@
 {% block title %}New claim · {{ site_name }}{% endblock %}
 {% block content %}
 <h1>Submit a claim</h1>
-<form class="claim-form" method="post" action="/claims/new">
+<form class="claim-form" method="post" action="/claims/new"{% if info and info.documents and info.documents.enabled %} enctype="multipart/form-data"{% endif %}>
   <label>Policy number
     <input name="policy_number" value="{{ form.policy_number or '' }}" required minlength="3" maxlength="32" placeholder="POL-48213">
     {% if errors.policy_number %}<em>{{ errors.policy_number }}</em>{% endif %}
@@ -36,9 +36,14 @@
   <label>Adjuster
     <input name="adjuster" value="{{ form.adjuster or '' }}" maxlength="120">
   </label>
-  <label class="muted">Photo
-    <input type="file" disabled>
-    <small>Stored on Nutanix Files from stage 3.</small>
+  <label class="{% if not (info and info.documents and info.documents.enabled) %}muted{% endif %}">Photo
+    {% if info and info.documents and info.documents.enabled %}
+      <input type="file" name="photo" accept="image/jpeg,image/png,image/gif,image/webp">
+      <small>JPEG, PNG, GIF, or WebP. Optional. 10 MB. The document VM writes it to Nutanix Files.</small>
+    {% else %}
+      <input type="file" disabled>
+      <small>Stored on Nutanix Files from stage 3.</small>
+    {% endif %}
   </label>
   <div class="wide actions">
     <button type="submit">Submit claim</button>

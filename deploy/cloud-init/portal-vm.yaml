@@ -4,7 +4,8 @@
 # Prism Central: Create VM > Guest Customization > Cloud-init (Linux) > Custom Script,
 # paste this file. Edit the values marked EDIT. The VM updates itself, installs what
 # install.sh needs, disables firewalld and SELinux, and reboots once. Then copy the
-# Claims Desk bundle to it and run sudo ./install.sh.
+# Claims Desk bundle to it and run sudo ./update.sh --stage 1 (or sudo ./install.sh).
+# Stage 3, from this same bundle: sudo ./update.sh --stage 3.
 #
 # Progress on the VM: sudo tail -f /var/log/cloud-init-output.log
 # Done when the VM has rebooted and /var/lib/claims-desk/vm-ready exists.
@@ -115,7 +116,7 @@ write_files:
     content: |
       #!/bin/bash
       set -euo pipefail
-      BUNDLE_URL="${BUNDLE_URL-https://github.com/apjgase/claims-desk-demo/releases/download/v0.1.0/claims-desk-demo-0.1.0.tar.gz}"   # EDIT (optional)
+      BUNDLE_URL="${BUNDLE_URL-https://github.com/apjgase/claims-desk-demo/releases/download/v0.2.0/claims-desk-demo-0.2.0.tar.gz}"   # EDIT (optional)
       [ -n "$BUNDLE_URL" ] || { echo "no BUNDLE_URL set; copy the bundle with scp"; exit 0; }
       dest=/opt/claims-desk-bundle
       mkdir -p "$dest"
@@ -125,7 +126,7 @@ write_files:
       fi
       tar -xzf /tmp/claims-desk-bundle.tar.gz -C "$dest"
       rm -f /tmp/claims-desk-bundle.tar.gz
-      echo "bundle extracted to $dest; run: cd $dest/claims-desk-demo-* && sudo ./install.sh"
+      echo "bundle extracted to $dest; run: cd $dest/claims-desk-demo-* && sudo ./update.sh --stage 1"
 
 runcmd:
   # SELinux: off now, and off after the reboot. On RHEL 9 the config file alone leaves

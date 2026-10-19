@@ -9,13 +9,14 @@ from decimal import Decimal
 from typing import Literal, Optional
 
 import psycopg
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from psycopg_pool import PoolTimeout
 from pydantic import BaseModel, Field
 
-from . import STAGE, __version__, config, db
+from . import __version__, config, db
+from .docs_client import DocsError, get_photo, health as docs_health, put_packet, put_photo
 
 log = logging.getLogger("claimsdesk.api")
 CFG = config.load()
@@ -82,7 +83,8 @@ async def info():
     out = {
         "service": "claims-api",
         "version": __version__,
-        "stage": STAGE,
+        "stage": config.stage_label(CFG),
+        "documents": docs_health(CFG),
         "host": IDENT,
         "db_endpoint": {"host": CFG["db_host"], "port": CFG["db_port"],
                         "database": CFG["db_name"], "schema": CFG["db_schema"]},
@@ -125,9 +127,62 @@ async def get_claim(claim_number: str):
     return row
 
 
+def _docs_failure(exc: DocsError):
+    return JSONResponse(status_code=exc.status, content={
+        "detail": str(exc),
+        "documents": CFG["docs_url"],
+    })
+
+
+@app.post("/api/v1/claims/{claim_number}/photo")
+async def upload_photo(claim_number: str, photo: UploadFile = File(...)):
+    if not CFG.get("docs_url"):
+        raise HTTPException(status_code=409, detail="document tier is not configured")
+    row = await _run(db.get_claim, claim_number)
+    if row is None:
+        raise HTTPException(status_code=404, detail="claim not found")
+    blob = await photo.read()
+    if not blob:
+        raise HTTPException(status_code=400, detail="photo is empty")
+    if len(blob) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="photo larger than 10 MB")
+    try:
+        path = await run_in_threadpool(
+            put_photo, CFG, claim_number, photo.filename or "photo", blob,
+            photo.content_type or "application/octet-stream")
+    except DocsError as exc:
+        return _docs_failure(exc)
+    stored = await _run(db.set_photo_path, claim_number, path)
+    return stored
+
+
+@app.get("/api/v1/claims/{claim_number}/photo")
+async def download_photo(claim_number: str):
+    if not CFG.get("docs_url"):
+        raise HTTPException(status_code=409, detail="document tier is not configured")
+    row = await _run(db.get_claim, claim_number)
+    if row is None or not row["photo_path"]:
+        raise HTTPException(status_code=404, detail="photo not found")
+    try:
+        content, media = await run_in_threadpool(get_photo, CFG, claim_number)
+    except DocsError as exc:
+        return _docs_failure(exc)
+    return Response(content=content, media_type=media)
+
+
 @app.patch("/api/v1/claims/{claim_number}")
 async def update_status(claim_number: str, body: StatusIn):
-    row = await _run(db.set_status, claim_number, body.status)
+    current = await _run(db.get_claim, claim_number)
+    if current is None:
+        raise HTTPException(status_code=404, detail="claim not found")
+    packet_url = None
+    # The accepted packet is written once, when the claim first becomes APPROVED.
+    if (body.status == "APPROVED" and not current["packet_url"] and CFG.get("docs_url")):
+        try:
+            packet_url = await run_in_threadpool(put_packet, CFG, dict(current))
+        except DocsError as exc:
+            return _docs_failure(exc)
+    row = await _run(db.set_status, claim_number, body.status, packet_url)
     if row is None:
         raise HTTPException(status_code=404, detail="claim not found")
     return row
