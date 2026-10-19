@@ -128,9 +128,11 @@ ssh_run() {
   fi
   if [ -n "$DOC_SSH_PASSWORD" ]; then
     opts+=(-o PreferredAuthentications=password -o PubkeyAuthentication=no -o NumberOfPasswordPrompts=1)
+    # shellcheck disable=SC2029 # arguments are for ssh, expanded on this machine
     SSHPASS="$DOC_SSH_PASSWORD" sshpass -e ssh "${opts[@]}" "${DOC_SSH_USER}@${DOC_HOST}" "$@"
   else
     opts+=(-o BatchMode=yes)
+    # shellcheck disable=SC2029
     ssh "${opts[@]}" "${DOC_SSH_USER}@${DOC_HOST}" "$@"
   fi
 }

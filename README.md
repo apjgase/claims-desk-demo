@@ -94,15 +94,15 @@ On another admin machine, copy the private key to `~/.ssh/claims-desk-lab` (mode
 
 ### 1. Get the bundle onto the VM
 
-With the portal cloud-init, the VM has already downloaded and extracted it to `/opt/claims-desk-bundle/claims-desk-demo-0.2.0` (re-run with `sudo claims-desk-fetch-bundle`). Otherwise, on the VM:
+With the portal cloud-init, the VM has already downloaded and extracted it to `/opt/claims-desk-bundle/claims-desk-demo-0.2.1` (re-run with `sudo claims-desk-fetch-bundle`). Otherwise, on the VM:
 
-**Offline bundle (recommended).** Includes the Python wheels for Rocky 9, so the VM needs only its dnf repositories. The asset is attached when `v0.2.0` is tagged; until then copy this directory to the VM.
+**Offline bundle (recommended).** Includes the Python wheels for Rocky 9, so the VM needs only its dnf repositories. The asset is attached when `v0.2.1` is tagged; until then copy this directory to the VM.
 
 ```bash
-REL=https://github.com/apjgase/claims-desk-demo/releases/download/v0.2.0
-curl -fLO $REL/claims-desk-demo-0.2.0.tar.gz -fLO $REL/claims-desk-demo-0.2.0.tar.gz.sha256
-sha256sum -c claims-desk-demo-0.2.0.tar.gz.sha256
-tar -xzf claims-desk-demo-0.2.0.tar.gz && cd claims-desk-demo-0.2.0
+REL=https://github.com/apjgase/claims-desk-demo/releases/download/v0.2.1
+curl -fLO $REL/claims-desk-demo-0.2.1.tar.gz -fLO $REL/claims-desk-demo-0.2.1.tar.gz.sha256
+sha256sum -c claims-desk-demo-0.2.1.tar.gz.sha256
+tar -xzf claims-desk-demo-0.2.1.tar.gz && cd claims-desk-demo-0.2.1
 ```
 
 Without internet on the VM, download it elsewhere (GitHub, **Releases**) and copy it with `scp`.
