@@ -1,3 +1,5 @@
+`0.2.3`: a refused Windows DNS update is a warning. The install continues.
+
 `0.2.2`: an NFS export may be a hostname (`labFS.ntnxlab.local:/documents`). `install.sh` registers the portal, and `update.sh --stage 3` registers the document VM, as A records on Windows DNS `10.55.19.6` in `ntnxlab.local`. The zone must allow nonsecure dynamic updates.
 
 Stage 3 is in this tree, together with stage 1. `sudo ./update.sh --stage 1` is the portal. `sudo ./update.sh --stage 3`, run on the portal, installs the document service on the document VM over SSH: NFSv3 photo on submit, Objects packet when the claim is approved. Objects TLS is not verified. `install.sh` remains the stage 1 installer.

@@ -109,8 +109,8 @@ local_ipv4() {
   printf '%s' "$ip"
 }
 
-# Publish an A record. A server that does not answer on TCP 53 is skipped, so a
-# lab without that DNS server still installs. A refusal is a hard error.
+# Publish an A record. A missing server or a refused update is a warning.
+# The install continues either way.
 dns_upsert() {
   local fqdn="$1" ip="$2"
   [[ "$fqdn" =~ ^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$ ]] \
@@ -133,12 +133,15 @@ update add ${fqdn}. 300 A ${ip}
 send
 EOF
   then
-    die "DNS update for ${fqdn} was refused by ${DNS_SERVER}. Set the ${DNS_ZONE} zone to Nonsecure and secure dynamic updates."
+    warn "DNS update for ${fqdn} was refused by ${DNS_SERVER}. Set the ${DNS_ZONE} zone to Nonsecure and secure dynamic updates. Continuing."
+    return 0
   fi
   local answers=""
   answers="$(dig +short "$fqdn" @"$DNS_SERVER" A || true)"
-  printf '%s\n' "$answers" | grep -x "$ip" >/dev/null \
-    || die "DNS server ${DNS_SERVER} did not return ${ip} for ${fqdn}"
+  if ! printf '%s\n' "$answers" | grep -x "$ip" >/dev/null; then
+    warn "DNS server ${DNS_SERVER} did not return ${ip} for ${fqdn}. Continuing."
+    return 0
+  fi
   DNS_PUBLISHED="$fqdn"
 }
 
