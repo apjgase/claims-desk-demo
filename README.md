@@ -77,7 +77,7 @@ In a Flow policy for `AppTier: Web`, the outbound rule to the database is the on
 
 In Prism Central: **Create VM → Guest Customization → Cloud-init (Linux) → Custom Script**, and paste the file after editing the lines marked `EDIT` (host name, FQDN, `lab01` address). The lab SSH key is already in it. The VM needs dnf repository access during first boot. It is ready when `/var/lib/claims-desk/vm-ready` exists; first-boot output is in `/var/log/cloud-init-output.log`. With the packages already present, `install.sh` skips dnf, reports SELinux and firewalld as disabled, and needs no repository access.
 
-Optionally, set `BUNDLE_URL` in the file to an internal address that serves the offline bundle; the VM then extracts it to `/opt/claims-desk-bundle`. The GitHub release needs a token, so for GitHub copy the bundle with `scp` (step 1).
+At first boot it also downloads the offline bundle from the GitHub release and extracts it to `/opt/claims-desk-bundle`. Without internet, set `BUNDLE_URL` in the file to an internal copy, or to `""`.
 
 ### Lab SSH key
 
@@ -94,21 +94,18 @@ On another admin machine, copy the private key to `~/.ssh/claims-desk-lab` (mode
 
 ### 1. Get the bundle onto the VM
 
-The repository is private, so download from a machine that can sign in to GitHub, then copy to the VM.
+With the portal cloud-init, the VM has already downloaded and extracted it to `/opt/claims-desk-bundle/claims-desk-demo-0.1.0` (re-run with `sudo claims-desk-fetch-bundle`). Otherwise, on the VM:
 
 **Offline bundle (recommended).** Includes the Python wheels for Rocky 9, so the VM needs only its dnf repositories:
 
 ```bash
-# on your laptop
-gh release download v0.1.0 -R apjgase/claims-desk-demo -p 'claims-desk-demo-*.tar.gz*'
-shasum -a 256 -c claims-desk-demo-0.1.0.tar.gz.sha256
-scp claims-desk-demo-0.1.0.tar.gz rocky@<portal-vm>:
-
-# on the VM
+REL=https://github.com/apjgase/claims-desk-demo/releases/download/v0.1.0
+curl -fLO $REL/claims-desk-demo-0.1.0.tar.gz -fLO $REL/claims-desk-demo-0.1.0.tar.gz.sha256
+sha256sum -c claims-desk-demo-0.1.0.tar.gz.sha256
 tar -xzf claims-desk-demo-0.1.0.tar.gz && cd claims-desk-demo-0.1.0
 ```
 
-Or in a browser: GitHub, **Releases**, download `claims-desk-demo-0.1.0.tar.gz`.
+Without internet on the VM, download it elsewhere (GitHub, **Releases**) and copy it with `scp`.
 
 **Source download.** GitHub, **Code → Download ZIP**, or `gh repo clone apjgase/claims-desk-demo`. The VM then installs Python packages from PyPI (set `PIP_INDEX_URL` for a mirror).
 

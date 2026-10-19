@@ -11,7 +11,7 @@ Items marked *verify* come from general product knowledge and were not checked a
 | DNS | `claims.internal`, served by dnsmasq on `lab01` (this repository) | Every subnet's IPAM points at `lab01` for DNS |
 | NTP | chrony on `lab01`, internet pool upstream | Every system takes time from `lab01` |
 | Internet | Direct | dnf, PyPI, container images, Helm charts work online; the offline bundle is optional |
-| Container registry | GHCR, images built by GitHub Actions | NKP needs outbound HTTPS to `ghcr.io` and a pull secret (the repository is private) |
+| Container registry | GHCR, images built by GitHub Actions | NKP needs outbound HTTPS to `ghcr.io`; public images need no pull secret |
 | Certificates | One lab CA (`scripts/lab-ca.sh`) | Portal, Objects, NKP ingress and NAI get CA-signed certificates; the CA is trusted by cloud-init, pods and the laptop |
 | Active Directory | None | Files is NFS-only; Objects uses local users |
 | GPU and NAI | NAI provisioning and model deployment are demonstrated; the chat pods call an inference endpoint outside the lab | Chat pods need the external endpoint URL, an API key, and outbound HTTPS |
@@ -101,7 +101,7 @@ Reserve static addresses outside the IPAM pools.
 ### Internet and registry
 
 - The portal VPC is No-NAT, so its internet path is the DC edge NAT. Allow 172.16.0.0/16 and the NKP node VLAN outbound there.
-- Images are pulled from `ghcr.io/apjgase/...` with a pull secret (a GitHub token with `read:packages`). Docker Hub images are rate-limited for anonymous pulls; the charts here avoid them where possible.
+- Images are pulled from `ghcr.io/apjgase/...`, published as public packages, so no pull secret is needed. Docker Hub images are rate-limited for anonymous pulls; the charts here avoid them where possible.
 - Cost Governance and Security Central are SaaS: Prism Central needs outbound HTTPS.
 
 ### Secrets to manage
