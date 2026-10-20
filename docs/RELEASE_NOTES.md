@@ -1,3 +1,5 @@
+`0.2.5`: `./update.sh --stage N` selects the active path and the architecture diagram. A lower stage stops using a later tier and leaves that tier in place.
+
 `0.2.4`: the architecture page keeps the live middleware reply, so stage 3 shows Portal, Document VM, Files, Objects, and PostgreSQL, and the photo field is enabled.
 
 `0.2.3`: a refused Windows DNS update is a warning. The install continues.

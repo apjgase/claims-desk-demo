@@ -90,6 +90,7 @@ def render(request: Request, name: str, status_code: int = 200, **ctx) -> HTMLRe
         site_name=CFG["site_name"],
         environment=CFG["environment"],
         stage=config.stage_label(CFG),
+        stage_number=config.stage_number(CFG),
         version=__version__,
         web=IDENT,
         api_url=CFG["api_url"],

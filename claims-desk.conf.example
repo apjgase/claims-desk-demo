@@ -29,6 +29,10 @@ SITE_NAME='Claims Desk'
 ENVIRONMENT='Prod'       # shown in the header: Prod or UAT
 SEED_COUNT=12            # sample claims loaded into an empty table; 0 = none
 
+# Stage 4 and 5. The web tier calls this URL. Empty until the first --stage 4.
+# Switching back to stage 3 points the web tier at the portal middleware again.
+POD_API_URL=''
+
 # Windows DNS. install.sh registers this VM. update.sh --stage 3 registers the
 # document VM. The zone must allow nonsecure dynamic updates.
 DNS_SERVER='10.55.19.6'

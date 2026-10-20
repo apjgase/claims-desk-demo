@@ -181,6 +181,8 @@ def test_stage3_about_and_photo_field(web_client, monkeypatch):
         }
 
     monkeypatch.setattr(api, "docs_health", fake_health)
+    web.CFG["stage"] = 3
+    api.CFG["stage"] = 3
     web._info_cache["data"] = None
     try:
         about = web_client.get("/about")
@@ -193,6 +195,38 @@ def test_stage3_about_and_photo_field(web_client, monkeypatch):
         assert 'type="file" name="photo"' in page.text
         assert 'type="file" disabled' not in page.text
     finally:
+        web.CFG["stage"] = 1
+        api.CFG["stage"] = 1
+        web._info_cache["data"] = None
+
+
+def test_lower_stage_keeps_documents_configured_but_unused(web_client, api_client):
+    from claimsdesk import api, web
+    saved = (api.CFG.get("stage"), api.CFG.get("docs_url"), web.CFG.get("stage"))
+    api.CFG["stage"] = 1
+    api.CFG["docs_url"] = "http://10.1.1.8:8090"
+    web.CFG["stage"] = 1
+    web._info_cache["data"] = None
+    try:
+        about = web_client.get("/about")
+        assert "Stage 1 - Portal VM" in about.text
+        assert "<b>Document VM</b>" not in about.text
+        assert 'type="file" disabled' in web_client.get("/claims/new").text
+        info = api_client.get("/api/v1/info").json()
+        assert info["documents"]["enabled"] is False
+        web.CFG["stage"] = 2
+        web._info_cache["data"] = None
+        ha = web_client.get("/about")
+        assert "PostgreSQL HA" in ha.text and "<b>Document VM</b>" not in ha.text
+        web.CFG["stage"] = 5
+        web.CFG["api_url"] = "https://claims-api.apps.ntnxlab.local"
+        web._info_cache["data"] = None
+        pods = web_client.get("/about")
+        assert "API pods" in pods.text and "Chat pods" in pods.text
+        assert "<b>Document VM</b>" not in pods.text
+    finally:
+        api.CFG["stage"], api.CFG["docs_url"], web.CFG["stage"] = saved
+        web.CFG["api_url"] = "http://127.0.0.1:8000"
         web._info_cache["data"] = None
 
 
@@ -220,6 +254,7 @@ def test_photo_and_packet(api_client, monkeypatch):
     monkeypatch.setattr(api, "put_packet", fake_packet)
     api.CFG["docs_url"] = "http://10.0.0.8:8090"
     api.CFG["docs_timeout"] = 5
+    api.CFG["stage"] = 3
     try:
         new = {"policy_number": "POL-90001", "claimant_name": "Photo Person",
                "loss_date": "2026-10-02", "loss_type": "Auto", "amount": "10.00",
@@ -246,6 +281,7 @@ def test_photo_and_packet(api_client, monkeypatch):
         assert calls["packet"] == 1
     finally:
         api.CFG["docs_url"] = ""
+        api.CFG["stage"] = 1
 
 
 def test_reset(database):

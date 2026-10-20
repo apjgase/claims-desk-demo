@@ -94,15 +94,15 @@ On another admin machine, copy the private key to `~/.ssh/claims-desk-lab` (mode
 
 ### 1. Get the bundle onto the VM
 
-With the portal cloud-init, the VM has already downloaded and extracted it to `/opt/claims-desk-bundle/claims-desk-demo-0.2.4` (re-run with `sudo claims-desk-fetch-bundle`). Otherwise, on the VM:
+With the portal cloud-init, the VM has already downloaded and extracted it to `/opt/claims-desk-bundle/claims-desk-demo-0.2.5` (re-run with `sudo claims-desk-fetch-bundle`). Otherwise, on the VM:
 
-**Offline bundle (recommended).** Includes the Python wheels for Rocky 9, so the VM needs only its dnf repositories. The asset is attached when `v0.2.4` is tagged; until then copy this directory to the VM.
+**Offline bundle (recommended).** Includes the Python wheels for Rocky 9, so the VM needs only its dnf repositories. The asset is attached when `v0.2.5` is tagged; until then copy this directory to the VM.
 
 ```bash
-REL=https://github.com/apjgase/claims-desk-demo/releases/download/v0.2.4
-curl -fLO $REL/claims-desk-demo-0.2.4.tar.gz -fLO $REL/claims-desk-demo-0.2.4.tar.gz.sha256
-sha256sum -c claims-desk-demo-0.2.4.tar.gz.sha256
-tar -xzf claims-desk-demo-0.2.4.tar.gz && cd claims-desk-demo-0.2.4
+REL=https://github.com/apjgase/claims-desk-demo/releases/download/v0.2.5
+curl -fLO $REL/claims-desk-demo-0.2.5.tar.gz -fLO $REL/claims-desk-demo-0.2.5.tar.gz.sha256
+sha256sum -c claims-desk-demo-0.2.5.tar.gz.sha256
+tar -xzf claims-desk-demo-0.2.5.tar.gz && cd claims-desk-demo-0.2.5
 ```
 
 Without internet on the VM, download it elsewhere (GitHub, **Releases**) and copy it with `scp`.
@@ -169,9 +169,10 @@ sudo claims-desk logs 200   # nginx, claims-web, claims-api
 | `/etc/nginx/nginx.conf` | Portal config; the original is `nginx.conf.claims-desk.orig` |
 | `/etc/pki/tls/certs/claims-desk.crt`, `/etc/pki/tls/private/claims-desk.key` | Certificate. Replace with your own and `systemctl reload nginx`, or set `TLS_CERT`/`TLS_KEY` |
 
-**Upgrade:** from the same extracted bundle, run `sudo ./update.sh --stage 1` again (or `sudo ./install.sh`). Code and packages are replaced; the database settings and data are kept.
-**Point at another database** (for example HAProxy 5000 for stage 2): `sudo ./update.sh --stage 1 --reconfigure`.
-**Add Files and Objects:** `sudo ./update.sh --stage 3`. Running it again upgrades the document VM and keeps the settings saved on the portal.
+**Select a stage:** `sudo ./update.sh --stage N` (1 through 5). This sets the active path and the architecture diagram. It does not change the database address. Dropping to a lower stage stops using a later tier and leaves that tier in place: the document VM, its keys, and any pods stay. Stage 4 and 5 point the web tier at the saved API pod URL; the first time, it asks for that URL.
+**Upgrade the portal code:** run the same command again for the stage you want active. `sudo ./install.sh` upgrades the portal and then the next `./update.sh --stage N` selects the diagram.
+**Point at another database:** `sudo ./update.sh --stage 1 --reconfigure`.
+**Add Files and Objects:** `sudo ./update.sh --stage 3` the first time. Running it again selects stage 3 and leaves the document VM as it is. `--reconfigure` installs it again.
 **Remove the portal:** `sudo ./uninstall.sh`. The database is left alone. The document VM is left alone too; its `claims-docs` service keeps running.
 
 ## Stage 3: document VM, Files, Objects

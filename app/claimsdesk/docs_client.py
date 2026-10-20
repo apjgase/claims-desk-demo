@@ -9,6 +9,8 @@ from typing import Any, Dict, Tuple
 
 import httpx
 
+from . import config
+
 
 class DocsError(Exception):
     def __init__(self, message: str, status: int = 502):
@@ -44,8 +46,8 @@ def _error(response: httpx.Response) -> DocsError:
 
 
 def health(cfg: Dict[str, Any]) -> Dict[str, Any]:
-    """Short probe for /api/v1/info. Empty docs_url means stage 1."""
-    if not cfg.get("docs_url"):
+    """Short probe for /api/v1/info. Below stage 3 the saved URL is not called."""
+    if not config.documents_active(cfg):
         return {"enabled": False}
     url = _url(cfg, "/health")
     try:

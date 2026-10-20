@@ -54,17 +54,31 @@ def _as_bool(value: Any) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
+def stage_number(cfg: Dict[str, Any]) -> int:
+    raw = cfg.get("stage")
+    if raw is None or raw == "":
+        return 1
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return 0
+
+
+def documents_active(cfg: Dict[str, Any]) -> bool:
+    """Stage 3 and above call the document tier. The saved URL stays either way."""
+    return stage_number(cfg) >= 3 and bool(str(cfg.get("docs_url") or "").strip())
+
+
 def stage_label(cfg: Dict[str, Any]) -> str:
     labels = {
         1: "Stage 1 - Portal VM",
         2: "Stage 2 - PostgreSQL HA",
         3: "Stage 3 - Document VM",
+        4: "Stage 4 - API pods",
+        5: "Stage 5 - Chat and NAI",
     }
-    try:
-        number = int(cfg.get("stage") or 1)
-    except (TypeError, ValueError):
-        return "Stage {}".format(cfg.get("stage"))
-    return labels.get(number, "Stage {}".format(number))
+    number = stage_number(cfg)
+    return labels.get(number, "Stage {}".format(cfg.get("stage")))
 
 
 def load() -> Dict[str, Any]:

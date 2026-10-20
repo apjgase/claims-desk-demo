@@ -122,7 +122,7 @@ write_files:
     content: |
       #!/bin/bash
       set -euo pipefail
-      BUNDLE_URL="${BUNDLE_URL-https://github.com/apjgase/claims-desk-demo/releases/download/v0.2.4/claims-desk-demo-0.2.4.tar.gz}"   # EDIT (optional)
+      BUNDLE_URL="${BUNDLE_URL-https://github.com/apjgase/claims-desk-demo/releases/download/v0.2.5/claims-desk-demo-0.2.5.tar.gz}"   # EDIT (optional)
       [ -n "$BUNDLE_URL" ] || { echo "no BUNDLE_URL set; copy the bundle with scp"; exit 0; }
       dest=/opt/claims-desk-bundle
       mkdir -p "$dest"

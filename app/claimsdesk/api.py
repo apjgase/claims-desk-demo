@@ -136,8 +136,8 @@ def _docs_failure(exc: DocsError):
 
 @app.post("/api/v1/claims/{claim_number}/photo")
 async def upload_photo(claim_number: str, photo: UploadFile = File(...)):
-    if not CFG.get("docs_url"):
-        raise HTTPException(status_code=409, detail="document tier is not configured")
+    if not config.documents_active(CFG):
+        raise HTTPException(status_code=409, detail="document tier is not in the active stage")
     row = await _run(db.get_claim, claim_number)
     if row is None:
         raise HTTPException(status_code=404, detail="claim not found")
@@ -158,8 +158,8 @@ async def upload_photo(claim_number: str, photo: UploadFile = File(...)):
 
 @app.get("/api/v1/claims/{claim_number}/photo")
 async def download_photo(claim_number: str):
-    if not CFG.get("docs_url"):
-        raise HTTPException(status_code=409, detail="document tier is not configured")
+    if not config.documents_active(CFG):
+        raise HTTPException(status_code=409, detail="document tier is not in the active stage")
     row = await _run(db.get_claim, claim_number)
     if row is None or not row["photo_path"]:
         raise HTTPException(status_code=404, detail="photo not found")
@@ -177,7 +177,7 @@ async def update_status(claim_number: str, body: StatusIn):
         raise HTTPException(status_code=404, detail="claim not found")
     packet_url = None
     # The accepted packet is written once, when the claim first becomes APPROVED.
-    if (body.status == "APPROVED" and not current["packet_url"] and CFG.get("docs_url")):
+    if (body.status == "APPROVED" and not current["packet_url"] and config.documents_active(CFG)):
         try:
             packet_url = await run_in_threadpool(put_packet, CFG, dict(current))
         except DocsError as exc:

@@ -1,15 +1,13 @@
 #!/usr/bin/env bash
 # Claims Desk updater. One bundle, every stage. Re-run it from the same directory.
 #
-#   sudo ./update.sh --stage 1                         portal only (same as ./install.sh)
-#   sudo ./update.sh --stage 3                         portal, then the document VM over SSH
-#   sudo ./update.sh --stage 3 --config claims-desk.conf -y
+#   sudo ./update.sh --stage N
 #
-# Stage 3 runs on the portal VM. It asks for the document VM, the NFSv3 export
-# (host:/path), and the Objects endpoint and keys, then logs into the document VM
-# and installs the document service there. It registers both VMs in Windows DNS.
-# The running portal process does not keep the Objects keys. A root-only copy is
-# saved on the portal so the next ./update.sh --stage 3 can upgrade without asking.
+# --stage N selects the active path and the architecture diagram.
+# The database address stays as configured. A lower stage stops using a later
+# tier and does not remove it: the document VM, its keys, and any pods stay.
+# Stage 4 and 5 point the web tier at the saved API pod URL.
+# The first --stage 3 installs the document VM. Later --stage 3 only selects it.
 set -euo pipefail
 umask 022
 
@@ -41,13 +39,15 @@ S3_SECRET_KEY="${S3_SECRET_KEY:-}"
 S3_REGION="${S3_REGION:-us-east-1}"
 DNS_SERVER="${DNS_SERVER:-10.55.19.6}"
 DNS_ZONE="${DNS_ZONE:-ntnxlab.local}"
+POD_API_URL="${POD_API_URL:-}"
+LOCAL_API_URL=http://127.0.0.1:8000
 
 usage() {
-  sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'
   cat <<'EOF'
 
 Options:
-  --stage N        1 = portal (default), 3 = portal plus the document VM
+  --stage N        1 to 5. Selects the active path and diagram. Does not remove later tiers.
   --config FILE    settings file (see claims-desk.conf.example)
   --reconfigure    ask for the database and the document settings again
   --seed N         sample claims on an empty table (default 12, 0 = none)
@@ -551,7 +551,8 @@ def merge(path, updates):
         fh.write("\n")
 
 merge("/etc/claims-desk/api.json", {"docs_url": url, "docs_timeout": 60, "stage": 3})
-merge("/etc/claims-desk/web.json", {"stage": 3, "api_timeout": 60})
+merge("/etc/claims-desk/web.json", {
+    "stage": 3, "api_timeout": 60, "api_url": "http://127.0.0.1:8000"})
 PY
   printf '%s\n' 3 > "$ETC/stage"
   systemctl restart claims-api claims-web
@@ -597,6 +598,90 @@ $(printf '\033[1;32m')Claims Desk stage 3 is running.$(printf '\033[0m')
 EOF
 }
 
+docs_configured() {
+  [ -f "$ETC/api.json" ] || return 1
+  python3 -c 'import json,sys
+d=json.load(open(sys.argv[1]))
+raise SystemExit(0 if str(d.get("docs_url") or "").strip() else 1)' "$ETC/api.json"
+}
+
+saved_pod_url() {
+  [ -f "$ETC/web.json" ] || return 0
+  python3 -c 'import json,sys
+d=json.load(open(sys.argv[1]))
+print(d.get("pod_api_url") or "")' "$ETC/web.json"
+}
+
+run_portal_install() {
+  local install_args=() quiet="${1:-}"
+  [ -n "$CONFIG" ] && install_args+=(--config "$CONFIG")
+  [ "$RECONFIGURE" -eq 1 ] && install_args+=(--reconfigure)
+  [ -n "$SEED_ARG" ] && install_args+=(--seed "$SEED_ARG")
+  [ "$ASSUME_YES" -eq 1 ] && install_args+=(-y)
+  if [ "$quiet" = "quiet" ]; then
+    CLAIMS_UPDATE_FOLLOW=1 "$BUNDLE/install.sh" "${install_args[@]}"
+  else
+    "$BUNDLE/install.sh" "${install_args[@]}"
+  fi
+}
+
+# Select the path and the diagram. Does not change the database address,
+# the document VM, or any pod deployment.
+apply_stage() {
+  local stage="$1" saved=""
+  if [ ! -f "$ETC/api.json" ] || [ ! -f "$ETC/web.json" ]; then
+    die "portal is not installed"
+  fi
+  saved="$(saved_pod_url)"
+  if [ -z "$POD_API_URL" ] && [ -n "$saved" ]; then
+    POD_API_URL="$saved"
+  fi
+  if [ "$stage" -ge 4 ] && [ -z "$POD_API_URL" ]; then
+    ask POD_API_URL "API pod URL"
+  fi
+  if [ "$stage" -ge 4 ]; then
+    [[ "$POD_API_URL" =~ ^https?://[^[:space:]]+$ ]] || die "API pod URL must be an http(s) URL"
+  fi
+  CLAIMS_STAGE="$stage" POD_API_URL="$POD_API_URL" LOCAL_API_URL="$LOCAL_API_URL" python3 - <<'PY'
+import json, os
+stage = int(os.environ["CLAIMS_STAGE"])
+pod = os.environ.get("POD_API_URL") or ""
+local = os.environ["LOCAL_API_URL"]
+
+def merge(path, updates):
+    with open(path) as fh:
+        data = json.load(fh)
+    data.update(updates)
+    fd = os.open(path, os.O_WRONLY | os.O_TRUNC)
+    with os.fdopen(fd, "w") as fh:
+        json.dump(data, fh, indent=2)
+        fh.write("\n")
+
+web_updates = {"stage": stage}
+if stage >= 4:
+    web_updates["pod_api_url"] = pod
+    web_updates["api_url"] = pod
+elif pod:
+    web_updates["api_url"] = local
+    web_updates["pod_api_url"] = pod
+else:
+    web_updates["api_url"] = local
+merge("/etc/claims-desk/api.json", {"stage": stage})
+merge("/etc/claims-desk/web.json", web_updates)
+PY
+  printf '%s\n' "$stage" > "$ETC/stage"
+  systemctl restart claims-api claims-web
+  info "active stage ${stage}. Database address unchanged."
+  if [ "$stage" -ge 4 ]; then
+    info "web tier calls ${POD_API_URL}. Pods are left as they are."
+  else
+    info "web tier calls ${LOCAL_API_URL}."
+  fi
+  if [ "$stage" -lt 3 ]; then
+    info "document VM is not on this path. Its configuration is unchanged."
+  fi
+}
+
 if [ -n "$CONFIG" ]; then
   [ -f "$CONFIG" ] || die "config file not found: $CONFIG"
   # shellcheck disable=SC1090
@@ -606,12 +691,13 @@ fi
 case "$STAGE" in
   1)
     [ "$APPLY" -eq 0 ] || die "--apply-documents is only valid with --stage 3"
-    install_args=()
-    [ -n "$CONFIG" ] && install_args+=(--config "$CONFIG")
-    [ "$RECONFIGURE" -eq 1 ] && install_args+=(--reconfigure)
-    [ -n "$SEED_ARG" ] && install_args+=(--seed "$SEED_ARG")
-    [ "$ASSUME_YES" -eq 1 ] && install_args+=(-y)
-    exec "$BUNDLE/install.sh" "${install_args[@]}"
+    run_portal_install
+    apply_stage 1
+    ;;
+  2)
+    [ "$APPLY" -eq 0 ] || die "--apply-documents is only valid with --stage 3"
+    run_portal_install quiet
+    apply_stage 2
     ;;
   3)
     [ "$(id -u)" -eq 0 ] || die "run as root: sudo $0 --stage 3"
@@ -620,9 +706,21 @@ case "$STAGE" in
       apply_documents
       exit 0
     fi
-    portal_stage3
+    if docs_configured && [ "$RECONFIGURE" -eq 0 ]; then
+      run_portal_install quiet
+      apply_stage 3
+      info "document VM left as it is."
+    else
+      portal_stage3
+    fi
+    ;;
+  4|5)
+    [ "$APPLY" -eq 0 ] || die "--apply-documents is only valid with --stage 3"
+    [[ "$STAGE" =~ ^[0-9]+$ ]] || die "stage must be a number"
+    run_portal_install quiet
+    apply_stage "$STAGE"
     ;;
   *)
-    die "stage must be 1 or 3 (stage 2 is the same portal pointed at HAProxy port 5000)"
+    die "stage must be 1, 2, 3, 4, or 5"
     ;;
 esac
