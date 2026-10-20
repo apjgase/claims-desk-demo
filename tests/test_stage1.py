@@ -187,7 +187,9 @@ def test_stage3_about_and_photo_field(web_client, monkeypatch):
     try:
         about = web_client.get("/about")
         assert about.status_code == 200
-        assert "Portal VM" in about.text and "Document VM" in about.text
+        assert "Adjuster browser" in about.text and "nginx + web tier" in about.text
+        assert "Middleware API" in about.text and "Document VM" in about.text
+        assert "PostgreSQL HA" not in about.text
         assert "labFS.ntnxlab.local:/documents" in about.text
         assert "NFS 2049" in about.text and "S3 443" in about.text
         assert "primary" in about.text and "unreachable" not in about.text

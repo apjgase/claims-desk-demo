@@ -99,6 +99,16 @@ table.claims { width: 100%; border-collapse: collapse; background: var(--panel);
 .hop.nfs { border-color: var(--lime); }
 .hop.s3 { border-color: var(--green); }
 .hop.db { border-color: var(--azure); }
+.arch-extend { display: grid;
+  grid-template-columns: minmax(150px, 1fr) auto minmax(170px, 1fr) auto minmax(200px, 1.15fr) auto minmax(210px, 1.15fr);
+  column-gap: 0.45rem; row-gap: 0.45rem; align-items: stretch;
+  margin: 1.2rem 0 1.5rem; overflow-x: auto; }
+.arch-extend > .hop { min-width: 0; }
+.arch-extend .branch { text-align: center; color: var(--dim); font-family: var(--mono); font-size: 0.78rem; }
+.arch-extend .fork { display: flex; flex-direction: column; justify-content: space-around;
+  color: var(--dim); font-family: var(--mono); font-size: 0.68rem; text-align: center; }
+.arch-extend .store { display: flex; flex-direction: column; gap: 0.45rem; min-width: 0; }
+.arch-extend .store .hop { min-width: 0; }
 .badge { font-family: var(--mono); font-size: 0.72rem; padding: 0.05rem 0.4rem; border-radius: 3px;
          align-self: flex-start; color: #fff; }
 .b-vm { background: var(--purple); }

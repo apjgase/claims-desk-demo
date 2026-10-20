@@ -94,15 +94,15 @@ On another admin machine, copy the private key to `~/.ssh/claims-desk-lab` (mode
 
 ### 1. Get the bundle onto the VM
 
-With the portal cloud-init, the VM has already downloaded and extracted it to `/opt/claims-desk-bundle/claims-desk-demo-0.2.5` (re-run with `sudo claims-desk-fetch-bundle`). Otherwise, on the VM:
+With the portal cloud-init, the VM has already downloaded and extracted it to `/opt/claims-desk-bundle/claims-desk-demo-0.2.6` (re-run with `sudo claims-desk-fetch-bundle`). Otherwise, on the VM:
 
-**Offline bundle (recommended).** Includes the Python wheels for Rocky 9, so the VM needs only its dnf repositories. The asset is attached when `v0.2.5` is tagged; until then copy this directory to the VM.
+**Offline bundle (recommended).** Includes the Python wheels for Rocky 9, so the VM needs only its dnf repositories. The asset is attached when `v0.2.6` is tagged; until then copy this directory to the VM.
 
 ```bash
-REL=https://github.com/apjgase/claims-desk-demo/releases/download/v0.2.5
-curl -fLO $REL/claims-desk-demo-0.2.5.tar.gz -fLO $REL/claims-desk-demo-0.2.5.tar.gz.sha256
-sha256sum -c claims-desk-demo-0.2.5.tar.gz.sha256
-tar -xzf claims-desk-demo-0.2.5.tar.gz && cd claims-desk-demo-0.2.5
+REL=https://github.com/apjgase/claims-desk-demo/releases/download/v0.2.6
+curl -fLO $REL/claims-desk-demo-0.2.6.tar.gz -fLO $REL/claims-desk-demo-0.2.6.tar.gz.sha256
+sha256sum -c claims-desk-demo-0.2.6.tar.gz.sha256
+tar -xzf claims-desk-demo-0.2.6.tar.gz && cd claims-desk-demo-0.2.6
 ```
 
 Without internet on the VM, download it elsewhere (GitHub, **Releases**) and copy it with `scp`.
@@ -206,7 +206,11 @@ Running `sudo ./update.sh --stage 3` again upgrades both VMs and reuses those sa
 - **Approve.** Moving the claim to `APPROVED` writes `{claim number}/packet.json` into the bucket and stores that URL on the claim. Other status changes do not touch Objects. A second approval does not write the object again.
 - Sample claims from `claims-desk seed` have neither a photo nor a packet.
 
-The architecture page (`/about`) shows the document VM, the export, and the Objects endpoint once stage 3 is in place.
+The architecture page (`/about`) keeps the stage 1 row on every stage that is drawn this way: adjuster browser, nginx and the web tier, middleware, PostgreSQL. A later stage adds a branch. It does not replace that row or move PostgreSQL onto another line.
+
+Stage 3 adds a branch from the middleware down to the document VM (`:8090`). Files (NFSv3 2049) and Objects (S3 443) both hang off the document VM. PostgreSQL keeps the stage 1 label and the live endpoint.
+
+Stages 4 and 5 follow the same pattern. Keep that row, and show only the tier that changed: stage 4 points the middleware box at the API pods and hangs Files and Objects off those pods; stage 5 adds chat pods and NAI as a further branch. Do not draw a new row that drops the browser and the web tier. The stage 4 and 5 diagrams in this tree still use the old replacement layout; the next change to those stages redraws them as an extension.
 
 ```bash
 curl -sS http://<document-vm>:8090/health

@@ -57,49 +57,64 @@
   </div>
 </div>
 {% elif stage_number == 3 %}
-<div class="arch">
-  <div class="arch-overhead">TCP {{ info.db_endpoint.port if info else 'database' }}</div>
-  <div class="path">
-    <div class="hop">
-      <span class="badge b-vm">VM</span>
-      <b>Portal VM</b>
-      <code>{{ web.hostname }}</code>
-      <code>{{ web.ip }} · HTTPS 443</code>
-    </div>
-    <div class="arrow">→</div>
-    <div class="hop {% if not (info and info.documents and info.documents.status == 'ok') %}down{% endif %}">
-      <span class="badge b-vm">VM</span>
-      <b>Document VM</b>
-      {% if info and info.documents and info.documents.host %}
-        <code>{{ info.documents.host.hostname }}</code>
-        <code>{{ info.documents.host.ip }} · :8090</code>
-      {% elif info and info.documents and info.documents.enabled %}
-        <code>{{ info.documents.error or 'unreachable' }}</code>
-      {% else %}<code>not configured</code>{% endif %}
-    </div>
-    <div class="arrow"><small>NFS 2049</small>→</div>
+<div class="arch-extend">
+  <div class="hop">
+    <span class="badge b-vm">CLIENT</span>
+    <b>Adjuster browser</b>
+    <code>HTTPS 443</code>
+  </div>
+  <div class="arrow">→</div>
+  <div class="hop">
+    <span class="badge b-vm">VM</span>
+    <b>nginx + web tier</b>
+    <code>{{ web.hostname }}</code>
+    <code>{{ web.ip }} · :8080</code>
+  </div>
+  <div class="arrow">→</div>
+  <div class="hop {% if not info %}down{% endif %}">
+    <span class="badge b-vm">{{ 'VM' if info and info.host.hostname == web.hostname else 'API' }}</span>
+    <b>Middleware API</b>
+    <code>{{ api_url }}</code>
+    {% if info %}<code>{{ info.host.hostname }} · {{ info.host.ip }}</code>{% else %}<code>unreachable</code>{% endif %}
+  </div>
+  <div class="arrow">→</div>
+  <div class="hop db {% if not (info and info.db and info.db.status == 'ok') %}down{% endif %}">
+    <span class="badge b-db">DB</span>
+    <b>PostgreSQL</b>
+    {% if info %}
+      <code>{{ info.db_endpoint.host }}:{{ info.db_endpoint.port }}</code>
+      {% if info.db.status == 'ok' %}
+        <code>served by {{ info.db.server_addr or 'local socket' }} · {{ 'replica' if info.db.in_recovery else 'primary' }}</code>
+      {% else %}<code>unavailable</code>{% endif %}
+    {% else %}<code>unknown</code>{% endif %}
+  </div>
+  <div></div><div></div><div></div><div></div>
+  <div class="branch">↓ :8090</div>
+  <div></div><div></div>
+  <div></div><div></div><div></div><div></div>
+  <div class="hop {% if not (info and info.documents and info.documents.status == 'ok') %}down{% endif %}">
+    <span class="badge b-vm">VM</span>
+    <b>Document VM</b>
+    {% if info and info.documents and info.documents.host %}
+      <code>{{ info.documents.host.hostname }}</code>
+      <code>{{ info.documents.host.ip }} · :8090</code>
+    {% elif info and info.documents and info.documents.enabled %}
+      <code>{{ info.documents.error or 'unreachable' }}</code>
+    {% else %}<code>not configured</code>{% endif %}
+  </div>
+  <div class="fork"><span>NFS 2049 →</span><span>S3 443 →</span></div>
+  <div class="store">
     <div class="hop nfs {% if not (info and info.documents and info.documents.nfs and info.documents.nfs.mounted) %}down{% endif %}">
       <span class="badge b-nfs">NFS</span>
       <b>Files</b>
       <code>{{ info.documents.nfs.export if info and info.documents and info.documents.nfs else 'unknown' }}</code>
       <code>NFSv3 · 2049</code>
     </div>
-    <div class="arrow"><small>S3 443</small>→</div>
     <div class="hop s3">
       <span class="badge b-s3">S3</span>
       <b>Objects</b>
       <code>{{ info.documents.s3.endpoint if info and info.documents and info.documents.s3 else 'unknown' }}</code>
       <code>bucket {{ info.documents.s3.bucket if info and info.documents and info.documents.s3 else '?' }} · WORM</code>
-    </div>
-    <div class="hop db {% if not (info and info.db and info.db.status == 'ok') %}down{% endif %}">
-      <span class="badge b-db">DB</span>
-      <b>PostgreSQL HA</b>
-      {% if info %}
-        <code>{{ info.db_endpoint.host }}:{{ info.db_endpoint.port }}</code>
-        {% if info.db.status == 'ok' %}
-          <code>served by {{ info.db.server_addr or 'local socket' }} · {{ 'replica' if info.db.in_recovery else 'primary' }}</code>
-        {% else %}<code>unavailable</code>{% endif %}
-      {% else %}<code>unknown</code>{% endif %}
     </div>
   </div>
 </div>

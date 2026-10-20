@@ -1,3 +1,5 @@
+`0.2.6`: the stage 3 architecture page extends the stage 1 row. The document VM, Files, and Objects hang off the middleware. Later stages keep that row and add a branch.
+
 `0.2.5`: `./update.sh --stage N` selects the active path and the architecture diagram. A lower stage stops using a later tier and leaves that tier in place.
 
 `0.2.4`: the architecture page keeps the live middleware reply, so stage 3 shows Portal, Document VM, Files, Objects, and PostgreSQL, and the photo field is enabled.
