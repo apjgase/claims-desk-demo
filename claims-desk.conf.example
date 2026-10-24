@@ -29,8 +29,9 @@ SITE_NAME='Claims Desk'
 ENVIRONMENT='Prod'       # shown in the header: Prod or UAT
 SEED_COUNT=12            # sample claims loaded into an empty table; 0 = none
 
-# Stage 4 and 5. The web tier calls this URL. Empty until the first --stage 4.
-# Switching back to stage 3 points the web tier at the portal middleware again.
+# Stage 4 and 5. The web tier calls this URL. Empty: the first --stage 4 deploys
+# the pods and fills it in. Set it only for pods you deployed yourself, without a
+# kubeconfig. Switching back to stage 3 points the web tier at the portal middleware again.
 POD_API_URL=''
 
 # Windows DNS. install.sh registers this VM. update.sh --stage 3 registers the
@@ -54,3 +55,16 @@ S3_BUCKET='claims'
 S3_ACCESS_KEY=''
 S3_SECRET_KEY=''
 S3_REGION='us-east-1'
+
+# Stage 4, used by: sudo ./update.sh --stage 4 --config claims-desk.conf -y
+# Deploys the API pods with Helm. Files and Objects come from the stage 3 lines
+# above (or /root/.claims-desk-stage3); the database from /etc/claims-desk/api.json.
+# The kubeconfig is copied to /root/.claims-desk/kubeconfig (0600).
+KUBECONFIG_FILE=''       # path on the portal VM, e.g. /root/nkp-mgmt.conf
+K8S_NAMESPACE='claims'
+STAGE4_LB_IP=''          # empty = MetalLB picks an address from its pool
+STAGE4_RUN_AS_UID=''     # empty = uid of claimsdesk on the document VM (read over SSH)
+STAGE4_RUN_AS_GID=''     # empty = its gid, or the uid
+IMAGE=''                 # empty = ghcr.io/apjgase/claims-desk-demo:<bundle version>
+# KUBECTL_URL=''         # internal mirror for the kubectl binary
+# HELM_URL=''            # internal mirror for the helm linux-amd64 tarball

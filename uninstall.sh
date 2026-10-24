@@ -24,6 +24,14 @@ if [ -f /root/.claims-desk-stage3 ]; then
   rm -f /root/.claims-desk-stage3
 fi
 
+if [ -d /root/.claims-desk ]; then
+  ns="$(sed -n "s/^K8S_NAMESPACE=//p" /root/.claims-desk/stage4 2>/dev/null | tr -d "'\"")"
+  echo "The API pods were not removed. To remove them from the cluster:"
+  echo "  helm --kubeconfig <kubeconfig> -n ${ns:-claims} uninstall claims-desk"
+  echo "  kubectl --kubeconfig <kubeconfig> -n ${ns:-claims} delete secret claims-desk"
+  rm -rf /root/.claims-desk
+fi
+
 systemctl disable --now claims-web claims-api 2>/dev/null || true
 rm -f /etc/systemd/system/claims-web.service /etc/systemd/system/claims-api.service
 systemctl daemon-reload

@@ -1,0 +1,35 @@
+{{- $vol := include "claims-desk.docsVolume" . -}}
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: {{ printf "%s-%s" .Release.Namespace $vol | trunc 63 | trimSuffix "-" }}
+  labels:
+    {{- include "claims-desk.labels" . | nindent 4 }}
+spec:
+  capacity:
+    storage: 10Gi
+  accessModes: [ReadWriteMany]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  mountOptions:
+    {{- toYaml .Values.nfs.mountOptions | nindent 4 }}
+  nfs:
+    server: {{ required "nfs.server is required" .Values.nfs.server | quote }}
+    path: {{ required "nfs.path is required" .Values.nfs.path | quote }}
+  claimRef:
+    namespace: {{ .Release.Namespace }}
+    name: {{ $vol }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $vol }}
+  labels:
+    {{- include "claims-desk.labels" . | nindent 4 }}
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: ""
+  volumeName: {{ printf "%s-%s" .Release.Namespace $vol | trunc 63 | trimSuffix "-" }}
+  resources:
+    requests:
+      storage: 10Gi

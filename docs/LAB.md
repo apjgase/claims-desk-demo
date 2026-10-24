@@ -144,8 +144,9 @@ Licences have to cover: Flow Network Security and Flow Virtual Networking (VPC, 
 - [ ] Control-plane VIP (`nkp-api`); MetalLB pool (Flow CNI does not allocate LoadBalancer IPs)
 - [ ] Ingress (NKP ships Traefik *verify*), `lab-dns wildcard apps <ingress IP>`, lab CA issuer or wildcard TLS Secret
 - [ ] Nodes trust the lab CA if they pull from anything it signs *verify how NKP sets node CA trust*
-- [ ] EgressIP per VPC, added to the NFS export and the bucket policy
-- [ ] GHCR pull secret in namespace `claims`
+- [ ] EgressIP per VPC, added to the NFS export and the bucket policy. Without Flow CNI (the `deploy/nkp/` cluster), pods leave from the node IPs: add those to `pg_hba.conf` and the NFS export instead
+- [ ] GHCR package `claims-desk-demo` set to public once, so no pull secret is needed
+- [ ] Deploy: `sudo ./update.sh --stage 4 --kubeconfig FILE` on the portal (README, Stage 4)
 - [ ] Flow policy: portal → PostgreSQL becomes a drop; portal → API pods 8443; API pods → PostgreSQL 5000
 - [ ] NDK installed (snapshot and restore within the cluster; replication to a second site is on the slides only)
 
@@ -176,7 +177,9 @@ Licences have to cover: Flow Network Security and Flow Virtual Networking (VPC, 
 | Lab CA script and certificates | all | done |
 | Document VM cloud-init (`deploy/cloud-init/document-vm.yaml`) | 3 | done |
 | Document-tier code: NFS photo writes, S3 path-style client for the WORM packet, `update.sh --stage 3` | 3 | done |
-| Container image for the middleware (Dockerfile, CI build, push to GHCR) | 4 | |
-| Helm chart: API deployment, Service, Ingress, ConfigMap and Secret, probes, CA bundle, NDK Application | 4 | |
+| Container image for the middleware and document service (Dockerfile, CI build, push to GHCR) | 4 | done |
+| Helm chart: API deployment (api + docs containers), LoadBalancer Service on 8443, NFS volume, Secret reference, probes | 4 | done |
+| `update.sh --stage 4 --kubeconfig FILE`: kubectl and helm, Secret, deploy, end-to-end check, stage switching | 4 | done |
+| Ingress with a lab CA certificate, CA bundle in the pods, NDK Application, Flow CNI namespace mapping | 4 | |
 | Chat service with a client for the external inference endpoint | 5 | |
 | Self-Service blueprint and runbooks, masking script, UAT values | 6 | |

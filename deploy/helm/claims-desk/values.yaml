@@ -1,0 +1,53 @@
+# Claims Desk stage 4. update.sh --stage 4 fills these from the portal's saved
+# settings. Secrets are not here: the chart reads Secret `existingSecret`.
+
+image:
+  repository: ghcr.io/apjgase/claims-desk-demo
+  tag: ""                  # empty = the chart appVersion
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+replicas: 2
+stage: 4
+
+# Keys: db-password, s3-access-key, s3-secret-key.
+existingSecret: claims-desk
+# Changes when update.sh rewrites the Secret, so the pods restart and read it.
+secretHash: ""
+
+db:
+  host: ""
+  port: 5432
+  name: claims
+  user: claims_app
+  sslmode: prefer
+  schema: claimsdesk
+
+# The same NFSv3 export the document VM mounts in stage 3.
+nfs:
+  server: ""
+  path: ""
+  mountPath: /mnt/claims-docs
+  mountOptions: [vers=3, proto=tcp, hard, timeo=600, retrans=2, nolock]
+
+s3:
+  endpoint: ""
+  bucket: claims
+  region: us-east-1
+
+# NFSv3 sends the numeric uid. Use the uid of claimsdesk on the document VM.
+runAsUser: 10001
+runAsGroup: 10001
+
+service:
+  type: LoadBalancer
+  port: 8443
+  loadBalancerIP: ""       # empty = MetalLB picks one from its pool
+
+resources:
+  api:
+    requests: {cpu: 100m, memory: 128Mi}
+    limits: {memory: 512Mi}
+  docs:
+    requests: {cpu: 50m, memory: 96Mi}
+    limits: {memory: 384Mi}

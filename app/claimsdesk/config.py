@@ -115,3 +115,16 @@ def host_identity() -> Dict[str, str]:
         except OSError:
             pass
     return {"hostname": name, "ip": addr}
+
+
+def runtime() -> Dict[str, str]:
+    """VM or Kubernetes pod. The Helm chart passes the pod details through the downward API."""
+    if not (os.environ.get("POD_NAMESPACE") or os.environ.get("KUBERNETES_SERVICE_HOST")):
+        return {"kind": "vm"}
+    return {
+        "kind": "pod",
+        "namespace": os.environ.get("POD_NAMESPACE", ""),
+        "node": os.environ.get("NODE_NAME", ""),
+        "node_ip": os.environ.get("NODE_IP", ""),
+        "pod_ip": os.environ.get("POD_IP", ""),
+    }

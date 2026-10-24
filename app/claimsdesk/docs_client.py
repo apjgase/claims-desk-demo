@@ -1,7 +1,8 @@
-"""Portal middleware client for the document VM.
+"""Middleware client for the document service.
 
-The portal never mounts Files and never holds the Objects keys. It calls this
-service on the document VM.
+Stage 3: the service runs on the document VM. Stage 4: it is the docs container
+in the same pod as the middleware. The middleware never mounts Files and never
+holds the Objects keys.
 """
 from datetime import date, datetime
 from decimal import Decimal
@@ -27,6 +28,10 @@ def plain(value: Any) -> Any:
     if isinstance(value, Decimal):
         return format(value, "f")
     return value
+
+
+def _tier() -> str:
+    return "document container" if config.runtime()["kind"] == "pod" else "document VM"
 
 
 def _url(cfg: Dict[str, Any], path: str) -> str:
@@ -80,8 +85,8 @@ def put_photo(cfg: Dict[str, Any], claim_number: str, filename: str,
             timeout=cfg["docs_timeout"],
         )
     except httpx.HTTPError as exc:
-        raise DocsError("document VM unreachable at {} ({})".format(
-            cfg["docs_url"], type(exc).__name__)) from exc
+        raise DocsError("{} unreachable at {} ({})".format(
+            _tier(), cfg["docs_url"], type(exc).__name__)) from exc
     if response.status_code >= 400:
         raise _error(response)
     return response.json()["photo_path"]
@@ -91,8 +96,8 @@ def get_photo(cfg: Dict[str, Any], claim_number: str) -> Tuple[bytes, str]:
     try:
         response = httpx.get(_url(cfg, "/v1/photos/" + claim_number), timeout=cfg["docs_timeout"])
     except httpx.HTTPError as exc:
-        raise DocsError("document VM unreachable at {} ({})".format(
-            cfg["docs_url"], type(exc).__name__)) from exc
+        raise DocsError("{} unreachable at {} ({})".format(
+            _tier(), cfg["docs_url"], type(exc).__name__)) from exc
     if response.status_code >= 400:
         raise _error(response)
     media = response.headers.get("content-type", "application/octet-stream")
@@ -107,8 +112,8 @@ def put_packet(cfg: Dict[str, Any], claim: Dict[str, Any]) -> str:
             timeout=cfg["docs_timeout"],
         )
     except httpx.HTTPError as exc:
-        raise DocsError("document VM unreachable at {} ({})".format(
-            cfg["docs_url"], type(exc).__name__)) from exc
+        raise DocsError("{} unreachable at {} ({})".format(
+            _tier(), cfg["docs_url"], type(exc).__name__)) from exc
     if response.status_code >= 400:
         raise _error(response)
     return response.json()["packet_url"]

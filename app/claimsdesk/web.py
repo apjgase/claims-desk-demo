@@ -6,7 +6,7 @@ import time
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 import httpx
 from fastapi import FastAPI, Form, Request
@@ -68,7 +68,7 @@ def api(method: str, path: str, **kw) -> Tuple[Optional[Any], Optional[str], int
     # also has a documents object; that is live health, not a failure.
     if (r.status_code >= 400 and isinstance(body, dict)
             and isinstance(body.get("documents"), str) and r.status_code not in (400, 404, 413, 415)):
-        return None, "Document VM unavailable at {}: {}".format(
+        return None, "Document service unavailable at {}: {}".format(
             body["documents"], body.get("detail", "no detail")), r.status_code
     if r.status_code >= 400:
         return body, None, r.status_code
@@ -85,6 +85,15 @@ def api_info() -> Optional[Dict[str, Any]]:
     return _info_cache["data"]
 
 
+def _port(url: str) -> int:
+    parts = urlparse(url)
+    try:
+        explicit = parts.port
+    except ValueError:
+        explicit = None
+    return explicit or (443 if parts.scheme == "https" else 80)
+
+
 def render(request: Request, name: str, status_code: int = 200, **ctx) -> HTMLResponse:
     ctx.update(
         site_name=CFG["site_name"],
@@ -94,6 +103,7 @@ def render(request: Request, name: str, status_code: int = 200, **ctx) -> HTMLRe
         version=__version__,
         web=IDENT,
         api_url=CFG["api_url"],
+        api_port=_port(CFG["api_url"]),
         info=api_info(),
         statuses=STATUSES,
         loss_types=LOSS_TYPES,

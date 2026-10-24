@@ -72,6 +72,7 @@ def health():
         "service": "claims-docs",
         "version": __version__,
         "host": config.host_identity(),
+        "runtime": config.runtime(),
         "nfs": {"export": cfg["nfs_export"], "mount": mount, "mounted": mounted},
         "s3": {
             "endpoint": cfg["s3_endpoint"],

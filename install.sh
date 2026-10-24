@@ -173,6 +173,12 @@ if [ -f "$ETC/api.json" ] && [ "$RECONFIGURE" -eq 0 ] && [ -z "$CONFIG" ]; then
   KEEP_DB=1
   info "existing install found: keeping the database settings in $ETC/api.json (use --reconfigure to change them)"
 fi
+# Set by update.sh when stage 4 is already active: the API pods are the database
+# client, and the Flow policy may drop this VM's traffic to PostgreSQL.
+NO_DB=0
+if [ "${CLAIMS_PORTAL_NO_DB:-}" = "1" ] && [ "$KEEP_DB" -eq 1 ]; then
+  NO_DB=1
+fi
 
 # ---------------------------------------------------------------- settings
 if [ "$KEEP_DB" -eq 0 ]; then
@@ -281,7 +287,9 @@ install -m 0755 "$BUNDLE/deploy/claims-desk" /usr/local/bin/claims-desk
 
 # ---------------------------------------------------------------- database
 step "Database"
-if [ "$KEEP_DB" -eq 1 ]; then
+if [ "$NO_DB" -eq 1 ]; then
+  info "stage 4 is active: the API pods use PostgreSQL, this VM does not. Skipped the database check."
+elif [ "$KEEP_DB" -eq 1 ]; then
   export CLAIMS_CONFIG="$ETC/api.json"
   admin_cli check-port
   admin_cli migrate
@@ -304,7 +312,9 @@ fi
 chown root:"$SVC_USER" "$ETC"/api.json "$ETC"/web.json
 chmod 0640 "$ETC"/api.json "$ETC"/web.json
 unset DB_ADMIN_PASSWORD CLAIMS_DB_PASSWORD
-admin_cli check
+if [ "$NO_DB" -eq 0 ]; then
+  admin_cli check
+fi
 
 # ---------------------------------------------------------------- TLS
 step "TLS certificate"
@@ -357,12 +367,19 @@ step "Services"
 install -m 0644 "$BUNDLE/deploy/systemd/claims-api.service" /etc/systemd/system/claims-api.service
 install -m 0644 "$BUNDLE/deploy/systemd/claims-web.service" /etc/systemd/system/claims-web.service
 systemctl daemon-reload
-systemctl enable -q claims-api claims-web nginx
-systemctl restart claims-api claims-web
-systemctl restart nginx
-info "claims-api, claims-web and nginx enabled and started"
+if [ "$NO_DB" -eq 1 ]; then
+  systemctl enable -q claims-web nginx
+  systemctl restart claims-web
+  systemctl restart nginx
+  info "claims-web and nginx restarted; claims-api stays off while the API pods serve stage 4"
+else
+  systemctl enable -q claims-api claims-web nginx
+  systemctl restart claims-api claims-web
+  systemctl restart nginx
+  info "claims-api, claims-web and nginx enabled and started"
+fi
 
-if [ "$SEED_COUNT" -gt 0 ]; then
+if [ "$SEED_COUNT" -gt 0 ] && [ "$NO_DB" -eq 0 ]; then
   admin_cli seed "$SEED_COUNT" --if-empty
 fi
 
@@ -375,7 +392,9 @@ for _ in $(seq 1 20); do
 done
 if [ "$ok" -eq 1 ]; then
   info "web     $(curl -sk https://127.0.0.1/healthz)"
-  info "api     $(curl -sk https://127.0.0.1/api/v1/health)"
+  if [ "$NO_DB" -eq 0 ]; then
+    info "api     $(curl -sk https://127.0.0.1/api/v1/health)"
+  fi
 else
   warn "health check failed: $(curl -sk https://127.0.0.1/healthz || echo 'no response')"
   warn "see: sudo claims-desk logs"

@@ -3,6 +3,8 @@
 set -euo pipefail
 
 PREFIX=/opt/claims-desk
+KUBECONFIG_SAVED=/root/.claims-desk/kubeconfig
+STAGE4_STATE=/root/.claims-desk/stage4
 admin() {
   CLAIMS_CONFIG=/etc/claims-desk/api.json PYTHONPATH="$PREFIX/app" \
     "$PREFIX/venv/bin/python" -m claimsdesk.admin "$@"
@@ -12,31 +14,71 @@ usage() {
   cat <<'EOF'
 Usage: claims-desk <command>
 
-  status         services and the end-to-end health check
+  status         services and the end-to-end health check (and the API pods at stage 4)
   check          log in to PostgreSQL as the app user; show which node answered
   info           database server details and claim counts (JSON)
   seed [N]       add N sample claims (default 12)
   reset          delete every claim and restart numbering (asks first)
-  restart        restart claims-api, claims-web and nginx
-  logs [N]       last N log lines of all three services (default 100)
+  restart        restart the portal services that the active stage uses
+  logs [N]       last N log lines of the portal services, and of the API pods at stage 4
+
+check, info, seed and reset connect from this VM to PostgreSQL. At stage 4 the
+Flow policy may drop that path; run them before the drop, or from stage 3.
 EOF
 }
 
 [ "$(id -u)" -eq 0 ] || { echo "run as root: sudo claims-desk $*" >&2; exit 1; }
 
+STAGE="$(tr -dc '0-9' < /etc/claims-desk/stage 2>/dev/null || true)"
+STAGE="${STAGE:-1}"
+K8S_NAMESPACE=claims
+if [ -f "$STAGE4_STATE" ]; then
+  # shellcheck disable=SC1090
+  . "$STAGE4_STATE"
+fi
+
+web_key() {
+  python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get(sys.argv[2]) or "")' \
+    /etc/claims-desk/web.json "$1" 2>/dev/null || true
+}
+
+pods_available() {
+  [ "$STAGE" -ge 4 ] && [ -f "$KUBECONFIG_SAVED" ] && command -v kubectl >/dev/null 2>&1
+}
+
+kc() { kubectl --kubeconfig "$KUBECONFIG_SAVED" -n "$K8S_NAMESPACE" "$@"; }
+
 case "${1:-}" in
   status)
+    printf '%-12s %s\n' "stage" "$STAGE"
     for svc in nginx claims-web claims-api; do
       printf '%-12s %s\n' "$svc" "$(systemctl is-active "$svc" || true)"
     done
+    if [ "$STAGE" -ge 4 ]; then
+      echo "             (claims-api is off at stage ${STAGE}: the API pods serve the web tier and /api/)"
+    fi
     printf '%-12s ' "health"
     curl -sk --max-time 10 https://127.0.0.1/healthz || echo "no response"
     echo
-    docs="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("docs_url",""))' /etc/claims-desk/api.json 2>/dev/null || true)"
-    if [ -n "$docs" ]; then
-      printf '%-12s ' "documents"
-      curl -fsS --max-time 5 "${docs%/}/health" || echo "no response"
+    if [ "$STAGE" -ge 4 ]; then
+      pod_url="$(web_key pod_api_url)"
+      printf '%-12s ' "api pods"
+      if [ -n "$pod_url" ]; then
+        curl -fsS --max-time 5 "${pod_url%/}/api/v1/health" || echo "no response from ${pod_url}"
+      else
+        echo "no API pod URL saved"
+      fi
       echo
+      if pods_available; then
+        kc get pods -l app.kubernetes.io/instance=claims-desk -o wide || true
+      fi
+    else
+      docs="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("docs_url",""))' /etc/claims-desk/api.json 2>/dev/null || true)"
+      if [ -n "$docs" ] && [ "$STAGE" -ge 3 ]; then
+        printf '%-12s ' "documents"
+        curl -fsS --max-time 5 "${docs%/}/health" || echo "no response"
+        echo
+      fi
     fi
     ;;
   check) admin check ;;
@@ -46,8 +88,20 @@ case "${1:-}" in
     read -r -p "Delete ALL claims? Type yes: " answer
     if [ "$answer" = "yes" ]; then admin reset; else echo "cancelled"; fi
     ;;
-  restart) systemctl restart claims-api claims-web nginx && echo "restarted" ;;
-  logs) journalctl -u claims-api -u claims-web -u nginx -n "${2:-100}" --no-pager ;;
+  restart)
+    if [ "$STAGE" -ge 4 ]; then
+      systemctl restart claims-web nginx && echo "restarted claims-web and nginx (claims-api stays off at stage ${STAGE})"
+    else
+      systemctl restart claims-api claims-web nginx && echo "restarted"
+    fi
+    ;;
+  logs)
+    journalctl -u claims-api -u claims-web -u nginx -n "${2:-100}" --no-pager
+    if pods_available; then
+      echo "---- API pods (namespace ${K8S_NAMESPACE})"
+      kc logs -l app.kubernetes.io/instance=claims-desk --all-containers --prefix --tail "${2:-100}" || true
+    fi
+    ;;
   -h|--help|help|"") usage ;;
   *) usage; exit 1 ;;
 esac

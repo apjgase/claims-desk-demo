@@ -1,0 +1,14 @@
+# Sample values for helm lint and helm template in CI. Not used by update.sh.
+db:
+  host: 172.16.10.20
+  port: 5000
+nfs:
+  server: labFS.ntnxlab.local
+  path: /documents
+s3:
+  endpoint: https://objects.ntnxlab.local
+runAsUser: 991
+runAsGroup: 991
+service:
+  loadBalancerIP: 10.10.120.150
+secretHash: ci

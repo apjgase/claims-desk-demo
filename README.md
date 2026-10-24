@@ -1,13 +1,13 @@
 # Claims Desk demo
 
-The working application behind the Claims Desk architecture deck. An adjuster submits a claim to a portal, and the claim lands in PostgreSQL. Each stage of the deck adds one piece to the same application. This repository holds the software and the scripts that install it. You provision the infrastructure (VMs, NDB, Files, Objects, Flow, NC2). `update.sh` turns a plain Rocky Linux 9 VM into the portal, and the same script adds later stages. `install.sh` is stage 1.
+The working application behind the Claims Desk architecture deck. An adjuster submits a claim to a portal, and the claim lands in PostgreSQL. Each stage of the deck adds one piece to the same application. This repository holds the software and the scripts that install it. You provision the infrastructure (VMs, NDB, Files, Objects, NKP, Flow, NC2). `update.sh` turns a plain Rocky Linux 9 VM into the portal, and the same script adds later stages, including the API pods on NKP. `install.sh` is stage 1.
 
 | Stage | Deck slide | What runs | Status |
 | :--- | :--- | :--- | :--- |
 | **1** | **4–5** | **Portal VM: nginx, web tier, middleware API. PostgreSQL provisioned by you (NDB).** | **In this tree** |
 | 2 | 5 | Same app on NDB PostgreSQL HA: point it at HAProxy port 5000 | Configuration only |
 | **3** | **6** | **Document VM writes the photo to Nutanix Files (NFSv3) and the accepted packet to Objects.** | **In this tree** |
-| 4 | 7 | API pods on NKP (Flow CNI) take the middleware role; portal to database becomes a Flow drop | Planned |
+| **4** | **7** | **API pods on NKP take the middleware and document role; portal to database becomes a Flow drop** | **In this tree** |
 | 5 | 8 | Chat pods and a NAI endpoint on the same NKP cluster | Planned |
 | 6 | 10 | UAT copy by NCM Self-Service from a masked NDB clone | Planned |
 
@@ -94,15 +94,15 @@ On another admin machine, copy the private key to `~/.ssh/claims-desk-lab` (mode
 
 ### 1. Get the bundle onto the VM
 
-With the portal cloud-init, the VM has already downloaded and extracted it to `/opt/claims-desk-bundle/claims-desk-demo-0.2.6` (re-run with `sudo claims-desk-fetch-bundle`). Otherwise, on the VM:
+With the portal cloud-init, the VM has already downloaded and extracted it to `/opt/claims-desk-bundle/claims-desk-demo-0.3.0` (re-run with `sudo claims-desk-fetch-bundle`). Otherwise, on the VM:
 
-**Offline bundle (recommended).** Includes the Python wheels for Rocky 9, so the VM needs only its dnf repositories. The asset is attached when `v0.2.6` is tagged; until then copy this directory to the VM.
+**Offline bundle (recommended).** Includes the Python wheels for Rocky 9, so the VM needs only its dnf repositories. The asset is attached when `v0.3.0` is tagged; until then copy this directory to the VM.
 
 ```bash
-REL=https://github.com/apjgase/claims-desk-demo/releases/download/v0.2.6
-curl -fLO $REL/claims-desk-demo-0.2.6.tar.gz -fLO $REL/claims-desk-demo-0.2.6.tar.gz.sha256
-sha256sum -c claims-desk-demo-0.2.6.tar.gz.sha256
-tar -xzf claims-desk-demo-0.2.6.tar.gz && cd claims-desk-demo-0.2.6
+REL=https://github.com/apjgase/claims-desk-demo/releases/download/v0.3.0
+curl -fLO $REL/claims-desk-demo-0.3.0.tar.gz -fLO $REL/claims-desk-demo-0.3.0.tar.gz.sha256
+sha256sum -c claims-desk-demo-0.3.0.tar.gz.sha256
+tar -xzf claims-desk-demo-0.3.0.tar.gz && cd claims-desk-demo-0.3.0
 ```
 
 Without internet on the VM, download it elsewhere (GitHub, **Releases**) and copy it with `scp`.
@@ -169,11 +169,12 @@ sudo claims-desk logs 200   # nginx, claims-web, claims-api
 | `/etc/nginx/nginx.conf` | Portal config; the original is `nginx.conf.claims-desk.orig` |
 | `/etc/pki/tls/certs/claims-desk.crt`, `/etc/pki/tls/private/claims-desk.key` | Certificate. Replace with your own and `systemctl reload nginx`, or set `TLS_CERT`/`TLS_KEY` |
 
-**Select a stage:** `sudo ./update.sh --stage N` (1 through 5). This sets the active path and the architecture diagram. It does not change the database address. Dropping to a lower stage stops using a later tier and leaves that tier in place: the document VM, its keys, and any pods stay. Stage 4 and 5 point the web tier at the saved API pod URL; the first time, it asks for that URL.
+**Select a stage:** `sudo ./update.sh --stage N` (1 through 5). This sets the active path and the architecture diagram. It does not change the database address. Dropping to a lower stage stops using a later tier and leaves that tier in place: the document VM, its keys, and any pods stay. Stage 4 and 5 point the web tier and `/api/` at the API pods and stop `claims-api` on the portal; stage 3 and lower start it again. The first `--stage 4` deploys the pods (see [Stage 4](#stage-4-api-pods-on-nkp)).
 **Upgrade the portal code:** run the same command again for the stage you want active. `sudo ./install.sh` upgrades the portal and then the next `./update.sh --stage N` selects the diagram.
 **Point at another database:** `sudo ./update.sh --stage 1 --reconfigure`.
 **Add Files and Objects:** `sudo ./update.sh --stage 3` the first time. Running it again selects stage 3 and leaves the document VM as it is. `--reconfigure` installs it again.
-**Remove the portal:** `sudo ./uninstall.sh`. The database is left alone. The document VM is left alone too; its `claims-docs` service keeps running.
+**Add the API pods:** `sudo ./update.sh --stage 4 --kubeconfig FILE` the first time. Running `--stage 4` again selects the pods, and upgrades them when the bundle is newer than the running image. `--reconfigure` deploys them again.
+**Remove the portal:** `sudo ./uninstall.sh`. The database is left alone. The document VM is left alone too; its `claims-docs` service keeps running. The API pods keep running; the script prints the `helm uninstall` command.
 
 ## Stage 3: document VM, Files, Objects
 
@@ -210,11 +211,88 @@ The architecture page (`/about`) keeps the stage 1 row on every stage that is dr
 
 Stage 3 adds a branch from the middleware down to the document VM (`:8090`). Files (NFSv3 2049) and Objects (S3 443) both hang off the document VM. PostgreSQL keeps the stage 1 label and the live endpoint.
 
-Stages 4 and 5 follow the same pattern. Keep that row, and show only the tier that changed: stage 4 points the middleware box at the API pods and hangs Files and Objects off those pods; stage 5 adds chat pods and NAI as a further branch. Do not draw a new row that drops the browser and the web tier. The stage 4 and 5 diagrams in this tree still use the old replacement layout; the next change to those stages redraws them as an extension.
+Stages 4 and 5 follow the same pattern. Keep that row, and show only the tier that changed: stage 4 turns the middleware box into the API pods and hangs Files and Objects off those pods; stage 5 adds chat pods and NAI as a further branch, marked *not deployed* until stage 5 code exists. Do not draw a new row that drops the browser and the web tier.
 
 ```bash
 curl -sS http://<document-vm>:8090/health
 sudo claims-desk status          # on the portal; includes the document health check
+```
+
+## Stage 4: API pods on NKP
+
+One run, on the portal VM, with the kubeconfig of the NKP cluster. The middleware and the document role move into pods. The portal keeps nginx and the web tier, and calls the pods on a MetalLB address, TCP 8443. The middleware on the portal VM is stopped, so the portal no longer connects to PostgreSQL, and the Flow drop on slide 7 can go in.
+
+```
+ Adjuster ──443──▶ Portal VM: nginx + web tier ──HTTP 8443──▶ Service claims-desk-api (LoadBalancer, MetalLB)
+                                                                  │
+                         ┌──────────── NKP, namespace claims, 2 pods ────────────┐
+                         │ api  :8000  (middleware, only DB client) ──5432/5000──▶ PostgreSQL (NDB)
+                         │ docs :8090  (same pod)  ──NFSv3 2049──▶ Files   ──S3 443──▶ Objects
+                         └───────────────────────────────────────────────────────┘
+```
+
+Each pod runs the same image twice: `api` is `claimsdesk.api`, and `docs` is `claimsdesk.docs` with the Files export mounted as a static NFSv3 volume. That is the share the document VM uses, so stage 3 photos stay readable. The document VM is left running and idle.
+
+### What you provision
+
+| Item | Requirement |
+| :--- | :--- |
+| NKP cluster | Built by `deploy/nkp/` or any NKP cluster with MetalLB (`--kubernetes-service-load-balancer-ip-range`). The default CNI is fine; Flow CNI is not required |
+| Kubeconfig | Copied to the portal VM, for example with `scp`. The portal needs TCP 6443 to the control-plane VIP |
+| Stage 3 | Recommended first: the pods reuse its Files and Objects settings and the `claimsdesk` uid from the document VM. Without it, the run asks for them |
+| PostgreSQL | `pg_hba.conf` allows the **node IPs** with password authentication. The pods leave the cluster from the node IP |
+| Files | The export allows the **node IPs** read-write, and the pods' uid can write (see below) |
+| Image | `ghcr.io/apjgase/claims-desk-demo:<version>`, built by GitHub Actions. The GHCR package must be public once (GitHub, Packages, the package, Package settings, Change visibility). Nodes need HTTPS to `ghcr.io` |
+
+### Network flows
+
+| From | To | Port | Why |
+| :--- | :--- | :--- | :--- |
+| Portal VM | NKP control-plane VIP | TCP 6443 | `kubectl` and `helm` during the run |
+| Portal VM | LoadBalancer IP | TCP 8443 | Web tier and `/api/` to the API pods |
+| NKP node IPs | PostgreSQL | TCP 5432 (5000 for HAProxy) | Middleware to database |
+| NKP node IPs | Files | TCP 2049 | Photo |
+| NKP node IPs | Objects | TCP 443 | Packet |
+| NKP node IPs | `ghcr.io` | TCP 443 | Image pull |
+| Portal VM | `dl.k8s.io`, `get.helm.sh` | TCP 443 | First run only, when `kubectl` or `helm` is missing |
+
+### Run it
+
+```bash
+sudo ./update.sh --stage 4 --kubeconfig /root/nkp-mgmt.conf
+```
+
+What it does:
+
+1. Upgrades the portal code, as every `update.sh` run does.
+2. Keeps the kubeconfig as `/root/.claims-desk/kubeconfig` (0600), and installs `kubectl` 1.35 and `helm` 3 if they are missing (checksums verified).
+3. Checks the cluster, lists the node IPs, and looks for a MetalLB pool.
+4. Reads the database settings from `/etc/claims-desk/api.json`, and Files and Objects from `/root/.claims-desk-stage3`. A Files host name is resolved here, and the pods mount it by address. Reads the uid and gid of `claimsdesk` on the document VM over SSH, so NFSv3 writes keep the same owner.
+5. Writes Secret `claims-desk` (database password, Objects keys) from stdin, then `helm upgrade --install claims-desk deploy/helm/claims-desk --wait`.
+6. Waits for the LoadBalancer IP, calls `http://<ip>:8443/api/v1/info` from the portal, and requires a pod runtime, the database, and the share. When a check fails it prints the pod events and logs, and says which entry is missing: the image, the export, or `pg_hba.conf`.
+7. Saves the pod URL in `web.json`, points nginx `/api/` at it, and stops `claims-api` on the portal.
+
+Unattended: add the stage 4 lines from [`claims-desk.conf.example`](claims-desk.conf.example), then `sudo ./update.sh --stage 4 --config claims-desk.conf -y`. Settings that are not secret are kept in `/root/.claims-desk/stage4` for the next run.
+
+### Switching
+
+| Command | Result |
+| :--- | :--- |
+| `sudo ./update.sh --stage 4` | Selects the pods. Upgrades them first when the running image is older than this bundle. Works with the Flow drop in place: the portal skips its database check |
+| `sudo ./update.sh --stage 3` | The portal middleware and the document VM take over again. The pods keep running. The portal must reach PostgreSQL again (remove the Flow drop first). Installs the document VM when stage 3 was never run |
+| `sudo ./update.sh --stage 1` or `--stage 2` | The portal middleware takes over again, without documents. The pods and the document VM keep running. Remove the Flow drop first: the portal checks PostgreSQL before it switches |
+| `sudo ./update.sh --stage 5` | Same pods as stage 4; the diagram adds the planned chat branch. The pods still report stage 4 in `/api/v1/info` |
+| `sudo ./update.sh --stage 4 --reconfigure` | Asks again and redeploys: a new export, new keys, a new uid. Also asks for the database settings and checks them from the portal, so remove the Flow drop first |
+
+Any stage can follow any other: going up to 4 or 5 deploys or selects the pods, going down to 1, 2 or 3 points nginx back at the portal middleware. Nothing is removed. Going from stage 1 or 2 straight to 4 works too; with no stage 3 settings to reuse, it asks for the Files export, the Objects keys and the pod uid.
+
+### What the adjuster sees
+
+The same pages. New claims show a pod name in *Written by*. `/about` shows the API pods with the pod name, node, and namespace; Files and Objects hang off the pods. `curl -k https://<portal>/api/v1/info` answers from a pod.
+
+```bash
+sudo claims-desk status     # portal services, the pod health, kubectl get pods
+sudo claims-desk logs 100   # portal services and both containers of every pod
 ```
 
 ## Troubleshooting
@@ -235,7 +313,14 @@ sudo claims-desk status          # on the portal; includes the document health c
 | `could not mount` the NFS export | From the document VM, TCP 2049 to the Files IP, and the export path. The script mounts NFSv3 (`vers=3,proto=tcp`) and gives up after 30 seconds. |
 | `cannot create a file` on the share | NFSv3 sends the numeric uid of `claimsdesk`. The export must allow that uid to write. |
 | `cannot reach bucket` | Endpoint URL, bucket name, or keys. TLS errors are not the cause: verification is off. The key needs to be able to read the bucket and put objects. |
-| Photo or packet says the document VM is unavailable | Portal to document VM TCP 8090. `curl -sS http://<document-vm>:8090/health` from the portal. |
+| Photo or packet says the document service is unavailable | Stage 3: portal to document VM TCP 8090, `curl -sS http://<document-vm>:8090/health` from the portal. Stage 4: the `docs` container, `sudo claims-desk logs`. |
+| `cannot reach the cluster` (stage 4) | TCP 6443 from the portal to the control-plane VIP, or the kubeconfig points at another address. `kubectl --kubeconfig /root/.claims-desk/kubeconfig get nodes`. |
+| `image pull failed` | The nodes cannot reach `ghcr.io`, the GHCR package is still private, or the version was not built yet (push to `main` or tag). `IMAGE=` in the config file picks another image. |
+| `NFS mount failed` | The export does not allow the node IPs, or TCP 2049 from the nodes is closed. Pods stay in `ContainerCreating`; `kubectl -n claims describe pod`. |
+| `the pods cannot use PostgreSQL` | Add the node IPs to `pg_hba.conf` and reload PostgreSQL; allow TCP 5432/5000 from them. |
+| `no load balancer IP after 2 minutes` | MetalLB has no free address in its pool, or `STAGE4_LB_IP` is outside it. `kubectl -n claims describe svc claims-desk-api`. |
+| `cannot reach http://<ip>:8443` | Routing or firewall from the portal VM to the MetalLB address. |
+| Photo upload fails with permission denied at stage 4 | The pods' uid cannot write on the share. Rerun with `STAGE4_RUN_AS_UID` set to the uid that owns the files, `--reconfigure`. |
 
 ## Development
 
@@ -246,4 +331,9 @@ bash scripts/e2e-rocky9.sh      # install.sh on Rocky 9 + systemd + PostgreSQL 1
 bash scripts/test-lab-services.sh   # lab01 cloud-init on Rocky 9 in Docker: DNS, NTP, CA trust, tools
 ```
 
-GitHub Actions runs all of them on every push to `main`, and validates the cloud-init files against Rocky 9's cloud-init schema. A tag `v*` attaches the offline bundle to a release.
+GitHub Actions runs all of them on every push to `main`, and validates the cloud-init files against Rocky 9's cloud-init schema. It also lints and renders the Helm chart, builds the container image, and smoke-tests it. On `main` and on `v*` tags it pushes the image to `ghcr.io/apjgase/claims-desk-demo:<version>`. A tag `v*` attaches the offline bundle to a release.
+
+```bash
+helm lint deploy/helm/claims-desk -f deploy/helm/claims-desk/ci-values.yaml
+docker build -t ghcr.io/apjgase/claims-desk-demo:dev .
+```

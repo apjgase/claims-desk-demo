@@ -22,6 +22,14 @@ jobs:
         run: |
           pip install -q -r app/requirements.txt -c app/constraints.txt pytest pgserver
           python -m pytest -q -p no:cacheprovider tests
+      - name: Helm chart (lint and render)
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+          helm lint deploy/helm/claims-desk -f deploy/helm/claims-desk/ci-values.yaml
+          helm template claims-desk deploy/helm/claims-desk -n claims -f deploy/helm/claims-desk/ci-values.yaml > /tmp/rendered.yaml
+          grep -q 'kind: Deployment' /tmp/rendered.yaml
+          grep -q 'type: LoadBalancer' /tmp/rendered.yaml
+          grep -q 'kind: PersistentVolume$' /tmp/rendered.yaml
       - name: ShellCheck (including scripts embedded in cloud-init)
         run: |
           shellcheck -x install.sh uninstall.sh update.sh deploy/claims-desk scripts/*.sh
@@ -42,6 +50,45 @@ jobs:
           docker run --rm -v "$PWD/deploy/cloud-init:/ci:ro" rockylinux/rockylinux:9 bash -c \
             "dnf -y -q install cloud-init >/dev/null && cloud-init --version && \
              for f in /ci/*.yaml; do cloud-init schema --config-file \$f --annotate; done"
+
+  image:
+    needs: test
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Image name and tags
+        id: meta
+        run: |
+          version="$(sed -n 's/^__version__ = "\(.*\)"/\1/p' app/claimsdesk/__init__.py)"
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "image=${image}" >> "$GITHUB_OUTPUT"
+      - name: Build
+        run: docker build -t "${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.version }}" .
+      - name: Smoke test (both services import, run as a non-root uid)
+        run: |
+          img="${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.version }}"
+          docker run --rm --user 1234 "$img" python -c "import claimsdesk.api, claimsdesk.docs; print('ok')"
+          docker run -d --name docs -p 8090:8090 -e CLAIMS_NFS_MOUNT=/tmp "$img" \
+            uvicorn claimsdesk.docs:app --host 0.0.0.0 --port 8090
+          for _ in $(seq 1 20); do curl -fsS http://127.0.0.1:8090/health && break; sleep 1; done
+          docker rm -f docs
+      - name: Push to GHCR
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+        run: |
+          echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          img="${{ steps.meta.outputs.image }}"
+          ver="${{ steps.meta.outputs.version }}"
+          docker tag "$img:$ver" "$img:sha-${GITHUB_SHA::7}"
+          docker push "$img:$ver"
+          docker push "$img:sha-${GITHUB_SHA::7}"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            docker tag "$img:$ver" "$img:latest"
+            docker push "$img:latest"
+          fi
 
   lab-services:
     needs: test

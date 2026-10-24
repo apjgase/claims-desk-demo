@@ -17,7 +17,7 @@ Choices that matter for later stages:
 - **The middleware's pool revalidates connections** (`check_connection`). After an NDB HA failover, a Flow change, or a restart, the next request reconnects. In between, the page says *Database unavailable* instead of hanging.
 - **Every row records `created_by_host`**: the VM or pod that wrote it. When pods take over in stage 4, new claims show pod names.
 - **`/api/v1/info` reports `inet_server_addr()` and `pg_is_in_recovery()`**: which PostgreSQL node answered and whether it is the primary. The footer of every page shows it.
-- **The architecture page extends the stage 1 row.** Browser, nginx and the web tier, middleware, and PostgreSQL stay in that order. Stage 3 hangs the document VM off the middleware, and Files and Objects off the document VM. Stages 4 and 5 do the same kind of extension: change the middleware box to the API pods, and add chat and NAI as another branch. Do not replace the row.
+- **The architecture page extends the stage 1 row.** Browser, nginx and the web tier, middleware, and PostgreSQL stay in that order. Stage 3 hangs the document VM off the middleware, and Files and Objects off the document VM. Stage 4 turns the middleware box into the API pods and hangs Files and Objects off them. Stage 5 adds chat and NAI as another branch. Do not replace the row.
 
 ## Data model
 

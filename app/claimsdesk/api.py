@@ -21,6 +21,7 @@ from .docs_client import DocsError, get_photo, health as docs_health, put_packet
 log = logging.getLogger("claimsdesk.api")
 CFG = config.load()
 IDENT = config.host_identity()
+RUNTIME = config.runtime()
 pool = db.make_pool(CFG)
 
 Status = Literal["SUBMITTED", "IN_REVIEW", "APPROVED", "REJECTED", "PAID"]
@@ -86,6 +87,7 @@ async def info():
         "stage": config.stage_label(CFG),
         "documents": docs_health(CFG),
         "host": IDENT,
+        "runtime": RUNTIME,
         "db_endpoint": {"host": CFG["db_host"], "port": CFG["db_port"],
                         "database": CFG["db_name"], "schema": CFG["db_schema"]},
     }

@@ -5,56 +5,79 @@
 <p class="lead">{{ stage }}. Every page you see took this path. The values are read live from each tier.</p>
 
 {% if stage_number >= 4 %}
-<div class="arch">
-  <div class="arch-overhead">TCP {{ info.db_endpoint.port if info else 'database' }}</div>
-  <div class="path">
-    <div class="hop">
-      <span class="badge b-vm">VM</span>
-      <b>Portal VM</b>
-      <code>{{ web.hostname }}</code>
-      <code>{{ web.ip }} · HTTPS 443</code>
-    </div>
-    <div class="arrow">→</div>
-    <div class="hop {% if not info %}down{% endif %}">
-      <span class="badge b-vm">API</span>
-      <b>API pods</b>
-      <code>{{ api_url }}</code>
-      {% if info %}<code>{{ info.host.hostname }} · {{ info.host.ip }}</code>{% else %}<code>unreachable</code>{% endif %}
-    </div>
-    <div class="arrow"><small>NFS 2049</small>→</div>
-    <div class="hop nfs {% if not (info and info.documents and info.documents.nfs and info.documents.nfs.mounted) %}down{% endif %}">
+{% set rt = info.runtime if info and info.runtime else {} %}
+{% set docs = info.documents if info and info.documents else {} %}
+<div class="arch-extend">
+  <div class="hop">
+    <span class="badge b-vm">CLIENT</span>
+    <b>Adjuster browser</b>
+    <code>HTTPS 443</code>
+  </div>
+  <div class="arrow">→</div>
+  <div class="hop">
+    <span class="badge b-vm">VM</span>
+    <b>nginx + web tier</b>
+    <code>{{ web.hostname }}</code>
+    <code>{{ web.ip }} · :8080</code>
+  </div>
+  <div class="arrow"><small>{{ api_url.split('://')[0] | upper }} {{ api_port }}</small>→</div>
+  <div class="hop pod {% if not info %}down{% endif %}">
+    <span class="badge b-pod">{{ 'POD' if rt.kind == 'pod' else 'API' }}</span>
+    <b>API pods</b>
+    <code>{{ api_url }}</code>
+    {% if info %}
+      <code>{{ info.host.hostname }} · {{ rt.pod_ip or info.host.ip }}</code>
+      {% if rt.kind == 'pod' %}<code>node {{ rt.node or '?' }} · ns {{ rt.namespace or '?' }}</code>{% endif %}
+    {% else %}<code>unreachable</code>{% endif %}
+  </div>
+  <div class="arrow">→</div>
+  <div class="hop db {% if not (info and info.db and info.db.status == 'ok') %}down{% endif %}">
+    <span class="badge b-db">DB</span>
+    <b>PostgreSQL</b>
+    {% if info %}
+      <code>{{ info.db_endpoint.host }}:{{ info.db_endpoint.port }}</code>
+      {% if info.db.status == 'ok' %}
+        <code>served by {{ info.db.server_addr or 'local socket' }} · {{ 'replica' if info.db.in_recovery else 'primary' }}</code>
+      {% else %}<code>unavailable</code>{% endif %}
+    {% else %}<code>unknown</code>{% endif %}
+  </div>
+  <div></div><div></div>
+  {% if stage_number >= 5 %}<div class="branch">↓ chat :8443</div>{% else %}<div></div>{% endif %}
+  <div></div>
+  <div class="branch">↓ docs container, same pod</div>
+  <div></div><div></div>
+  {% if stage_number >= 5 %}
+  <div class="hop planned">
+    <span class="badge b-pod">NAI</span>
+    <b>NAI endpoint</b>
+    <code>GPU node pool</code>
+    <code>not deployed</code>
+  </div>
+  <div class="arrow"><small>HTTPS 443</small>←</div>
+  <div class="hop planned">
+    <span class="badge b-pod">POD</span>
+    <b>Chat pods</b>
+    <code>same NKP cluster</code>
+    <code>not deployed</code>
+  </div>
+  {% else %}<div></div><div></div><div></div>{% endif %}
+  <div></div>
+  <div class="store">
+    <div class="hop nfs {% if not (docs.nfs and docs.nfs.mounted) %}down{% endif %}">
       <span class="badge b-nfs">NFS</span>
       <b>Files</b>
-      <code>{{ info.documents.nfs.export if info and info.documents and info.documents.nfs else 'on the API tier' }}</code>
-      <code>NFSv3 · 2049</code>
+      <code>{{ docs.nfs.export if docs.nfs else ('unreachable' if docs.enabled else 'not configured') }}</code>
+      <code>NFSv3 · 2049 · from the node IP</code>
     </div>
-    <div class="arrow"><small>S3 443</small>→</div>
-    <div class="hop s3">
+    <div class="hop s3 {% if docs.status != 'ok' %}down{% endif %}">
       <span class="badge b-s3">S3</span>
       <b>Objects</b>
-      <code>{{ info.documents.s3.endpoint if info and info.documents and info.documents.s3 else 'on the API tier' }}</code>
-      <code>bucket {{ info.documents.s3.bucket if info and info.documents and info.documents.s3 else 'claims' }} · WORM</code>
+      <code>{{ docs.s3.endpoint if docs.s3 else 'unknown' }}</code>
+      <code>bucket {{ docs.s3.bucket if docs.s3 else '?' }} · WORM</code>
     </div>
-    <div class="hop db {% if not (info and info.db and info.db.status == 'ok') %}down{% endif %}">
-      <span class="badge b-db">DB</span>
-      <b>PostgreSQL HA</b>
-      {% if info %}
-        <code>{{ info.db_endpoint.host }}:{{ info.db_endpoint.port }}</code>
-        {% if info.db.status == 'ok' %}
-          <code>served by {{ info.db.server_addr or 'local socket' }} · {{ 'replica' if info.db.in_recovery else 'primary' }}</code>
-        {% else %}<code>unavailable</code>{% endif %}
-      {% else %}<code>unknown</code>{% endif %}
-    </div>
-    {% if stage_number >= 5 %}
-    <div class="arrow">→</div>
-    <div class="hop">
-      <span class="badge b-vm">API</span>
-      <b>Chat pods</b>
-      <code>NAI endpoint</code>
-      <code>same cluster</code>
-    </div>
-    {% endif %}
   </div>
+  <div></div>
+  <div class="arch-note">Document VM: idle, not on this path. The docs container in each API pod writes the photo to Files and the packet to Objects.</div>
 </div>
 {% elif stage_number == 3 %}
 <div class="arch-extend">
@@ -171,5 +194,6 @@
   <li><b>DB served by</b> is <code>inet_server_addr()</code>: the PostgreSQL node that answered. Behind HAProxy (stage 2) it changes when Patroni promotes a new primary.</li>
   <li>The web tier never opens a database connection. Only the middleware does, so moving the middleware into pods later is a configuration change.</li>
   <li>From stage 3 the document VM writes the photo to Files when the claim is submitted, and the accepted packet to Objects when the claim is moved to <b>APPROVED</b>. The portal does not mount the share and does not hold the Objects keys.</li>
+  <li>From stage 4 the API pods on NKP take both roles: the middleware container is the only database client, and the docs container in the same pod writes Files and Objects. The middleware on the portal VM is stopped. New claims show a pod name in <b>Written by</b>.</li>
 </ul>
 {% endblock %}

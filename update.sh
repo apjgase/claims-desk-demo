@@ -2,12 +2,14 @@
 # Claims Desk updater. One bundle, every stage. Re-run it from the same directory.
 #
 #   sudo ./update.sh --stage N
+#   sudo ./update.sh --stage 4 --kubeconfig FILE
 #
 # --stage N selects the active path and the architecture diagram.
 # The database address stays as configured. A lower stage stops using a later
 # tier and does not remove it: the document VM, its keys, and any pods stay.
-# Stage 4 and 5 point the web tier at the saved API pod URL.
 # The first --stage 3 installs the document VM. Later --stage 3 only selects it.
+# The first --stage 4 deploys the API pods with Helm, using the kubeconfig.
+# Later --stage 4 selects them, and upgrades them when this bundle is newer.
 set -euo pipefail
 umask 022
 
@@ -41,15 +43,34 @@ DNS_SERVER="${DNS_SERVER:-10.55.19.6}"
 DNS_ZONE="${DNS_ZONE:-ntnxlab.local}"
 POD_API_URL="${POD_API_URL:-}"
 LOCAL_API_URL=http://127.0.0.1:8000
+NGINX_CONF=/etc/nginx/nginx.conf
+
+# Stage 4: API pods on NKP.
+KUBE_DIR=/root/.claims-desk
+KUBECONFIG_SAVED="$KUBE_DIR/kubeconfig"
+STAGE4_STATE="$KUBE_DIR/stage4"
+KUBECONFIG_FILE="${KUBECONFIG_FILE:-}"
+K8S_NAMESPACE="${K8S_NAMESPACE:-}"
+STAGE4_LB_IP="${STAGE4_LB_IP:-}"
+STAGE4_RUN_AS_UID="${STAGE4_RUN_AS_UID:-}"
+STAGE4_RUN_AS_GID="${STAGE4_RUN_AS_GID:-}"
+IMAGE="${IMAGE:-}"
+RELEASE=claims-desk
+POD_PORT=8443
+KUBECTL_MINOR=1.35
+KUBECTL_FALLBACK=v1.35.2
+HELM_VERSION=v3.16.4
+CHART="$BUNDLE/deploy/helm/claims-desk"
 
 usage() {
-  sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
   cat <<'EOF'
 
 Options:
   --stage N        1 to 5. Selects the active path and diagram. Does not remove later tiers.
+  --kubeconfig F   stage 4: kubeconfig of the NKP cluster; kept in /root/.claims-desk (0600)
   --config FILE    settings file (see claims-desk.conf.example)
-  --reconfigure    ask for the database and the document settings again
+  --reconfigure    ask for the database and the document settings again; redeploy the pods
   --seed N         sample claims on an empty table (default 12, 0 = none)
   -y, --yes        do not ask for confirmation
   -h, --help       this help
@@ -60,6 +81,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --stage) STAGE="${2:?--stage needs a number}"; shift 2 ;;
     --apply-documents) APPLY=1; shift ;;
+    --kubeconfig) KUBECONFIG_FILE="${2:?--kubeconfig needs a file}"; shift 2 ;;
     --config) CONFIG="${2:?--config needs a file}"; shift 2 ;;
     --reconfigure) RECONFIGURE=1; shift ;;
     --seed) SEED_ARG="${2:?--seed needs a number}"; shift 2 ;;
@@ -598,6 +620,400 @@ $(printf '\033[1;32m')Claims Desk stage 3 is running.$(printf '\033[0m')
 EOF
 }
 
+# ---------------------------------------------------------------- stage 4: API pods
+
+kc() { kubectl --kubeconfig "$KUBECONFIG_SAVED" "$@"; }
+hm() { helm --kubeconfig "$KUBECONFIG_SAVED" "$@"; }
+
+bundle_version() {
+  sed -n 's/^__version__ = "\(.*\)"/\1/p' "$BUNDLE/app/claimsdesk/__init__.py"
+}
+
+active_stage() {
+  local s=""
+  [ -f "$ETC/stage" ] && s="$(tr -dc '0-9' < "$ETC/stage")"
+  printf '%s' "${s:-1}"
+}
+
+load_stage4_state() {
+  local ns="$K8S_NAMESPACE" lb="$STAGE4_LB_IP" uid="$STAGE4_RUN_AS_UID" gid="$STAGE4_RUN_AS_GID" img="$IMAGE"
+  if [ -f "$STAGE4_STATE" ]; then
+    # shellcheck disable=SC1090
+    . "$STAGE4_STATE"
+  fi
+  # Values from the command line or --config win over the saved ones.
+  K8S_NAMESPACE="${ns:-${K8S_NAMESPACE:-claims}}"
+  STAGE4_LB_IP="${lb:-${STAGE4_LB_IP:-}}"
+  STAGE4_RUN_AS_UID="${uid:-${STAGE4_RUN_AS_UID:-}}"
+  STAGE4_RUN_AS_GID="${gid:-${STAGE4_RUN_AS_GID:-}}"
+  IMAGE="${img:-${IMAGE:-}}"
+}
+
+save_stage4_state() {
+  install -d -m 700 "$KUBE_DIR"
+  umask 077
+  {
+    printf 'K8S_NAMESPACE=%q\n' "$K8S_NAMESPACE"
+    printf 'STAGE4_LB_IP=%q\n' "$STAGE4_LB_IP"
+    printf 'STAGE4_RUN_AS_UID=%q\n' "$STAGE4_RUN_AS_UID"
+    printf 'STAGE4_RUN_AS_GID=%q\n' "$STAGE4_RUN_AS_GID"
+    printf 'IMAGE=%q\n' "$IMAGE"
+  } > "$STAGE4_STATE"
+  umask 022
+}
+
+have_kubeconfig() { [ -n "$KUBECONFIG_FILE" ] || [ -f "$KUBECONFIG_SAVED" ]; }
+
+save_kubeconfig() {
+  install -d -m 700 "$KUBE_DIR"
+  if [ -z "$KUBECONFIG_FILE" ] && [ ! -f "$KUBECONFIG_SAVED" ]; then
+    ask KUBECONFIG_FILE "Kubeconfig of the NKP cluster (path on this VM)"
+  fi
+  if [ -n "$KUBECONFIG_FILE" ]; then
+    [ -r "$KUBECONFIG_FILE" ] || die "kubeconfig not found: ${KUBECONFIG_FILE}"
+    grep -q '^clusters:' "$KUBECONFIG_FILE" || die "${KUBECONFIG_FILE} does not look like a kubeconfig (no clusters:)"
+    if [ "$(readlink -f "$KUBECONFIG_FILE")" != "$KUBECONFIG_SAVED" ]; then
+      install -m 600 "$KUBECONFIG_FILE" "$KUBECONFIG_SAVED"
+    fi
+    info "kubeconfig saved in ${KUBECONFIG_SAVED} (root only). You can delete ${KUBECONFIG_FILE}."
+  fi
+  [ -f "$KUBECONFIG_SAVED" ] || die "no kubeconfig. Rerun with --kubeconfig FILE"
+}
+
+# download URL FILE; verifies against URL.sha256 or URL.sha256sum when the server has one.
+download_verified() {
+  local url="$1" out="$2" sum="" ext
+  curl -fsSL --retry 3 -o "$out" "$url" || die "could not download ${url}"
+  for ext in sha256 sha256sum; do
+    if sum="$(curl -fsSL "${url}.${ext}" 2>/dev/null)"; then
+      sum="$(printf '%s' "$sum" | awk '{print $1; exit}')"
+      break
+    fi
+    sum=""
+  done
+  if [ -z "$sum" ]; then
+    warn "no checksum published next to ${url}. Not verified."
+    return 0
+  fi
+  echo "${sum}  ${out}" | sha256sum --check --quiet || die "checksum mismatch for ${url}"
+}
+
+install_k8s_tools() {
+  local tmp ver
+  tmp="$(mktemp -d)"
+  if ! command -v kubectl >/dev/null 2>&1; then
+    ver="$(curl -fsSL "https://dl.k8s.io/release/stable-${KUBECTL_MINOR}.txt" 2>/dev/null || echo "$KUBECTL_FALLBACK")"
+    info "installing kubectl ${ver}"
+    download_verified "${KUBECTL_URL:-https://dl.k8s.io/release/${ver}/bin/linux/amd64/kubectl}" "$tmp/kubectl"
+    install -m 0755 "$tmp/kubectl" /usr/local/bin/kubectl
+  fi
+  info "kubectl $(kubectl version --client -o json 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["clientVersion"]["gitVersion"])' 2>/dev/null || echo present)"
+  if ! command -v helm >/dev/null 2>&1; then
+    info "installing helm ${HELM_VERSION}"
+    download_verified "${HELM_URL:-https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz}" "$tmp/helm.tgz"
+    tar -xzf "$tmp/helm.tgz" -C "$tmp"
+    install -m 0755 "$tmp/linux-amd64/helm" /usr/local/bin/helm
+  fi
+  info "helm $(helm version --short 2>/dev/null || echo present)"
+  rm -rf "$tmp"
+}
+
+node_ips() {
+  kc get nodes -o jsonpath='{range .items[*]}{.status.addresses[?(@.type=="InternalIP")].address}{" "}{end}' 2>/dev/null || true
+}
+
+stage4_preflight() {
+  local server nodes
+  server="$(kc config view --minify -o jsonpath='{.clusters[0].cluster.server}' 2>/dev/null || true)"
+  info "cluster ${server:-unknown}"
+  kc get nodes -o wide >/dev/null 2>&1 \
+    || die "cannot reach the cluster at ${server:-the kubeconfig server}. Open TCP 6443 from this VM to the control-plane VIP, and check the kubeconfig."
+  kc get nodes -o wide | sed 's/^/   /'
+  nodes="$(node_ips)"
+  STAGE4_NODE_IPS="${nodes% }"
+  if kc get ipaddresspools.metallb.io -A >/dev/null 2>&1; then
+    info "MetalLB pools: $(kc get ipaddresspools.metallb.io -A -o jsonpath='{range .items[*]}{.metadata.name}={.spec.addresses}{" "}{end}')"
+  else
+    warn "no MetalLB IPAddressPool found. The Service needs a load balancer; NKP sets one up from --kubernetes-service-load-balancer-ip-range."
+  fi
+  info "pods leave the cluster from the node IPs: ${STAGE4_NODE_IPS:-unknown}"
+  info "allow them in pg_hba.conf (PostgreSQL) and on the NFS export, read-write"
+}
+
+# Fills DB_* from the portal's api.json, and NFS_* / S3_* from the stage 3 settings.
+stage4_settings() {
+  local line
+  line="$(python3 - "$ETC/api.json" <<'PY'
+import json, shlex, sys
+c = json.load(open(sys.argv[1]))
+for key in ("db_host", "db_port", "db_name", "db_user", "db_password", "db_sslmode", "db_schema"):
+    print("{}={}".format(key.upper(), shlex.quote(str(c.get(key, "")))))
+PY
+)" || die "cannot read ${ETC}/api.json"
+  eval "$line"
+  [ -n "${DB_HOST:-}" ] || die "no database in ${ETC}/api.json. Run stage 1 first."
+
+  if [ -f "$SECRET" ]; then
+    # Non-empty values from --config win over the saved stage 3 settings.
+    local c_nfs="" c_ep="" c_bucket="" c_ak="" c_sk="" c_host="" c_key=""
+    if [ -n "$CONFIG" ]; then
+      c_nfs="$NFS_EXPORT" c_ep="$S3_ENDPOINT" c_bucket="$S3_BUCKET" c_ak="$S3_ACCESS_KEY"
+      c_sk="$S3_SECRET_KEY" c_host="$DOC_HOST" c_key="$DOC_SSH_KEY"
+    fi
+    # shellcheck disable=SC1090
+    . "$SECRET"
+    NFS_EXPORT="${c_nfs:-$NFS_EXPORT}" S3_ENDPOINT="${c_ep:-$S3_ENDPOINT}" S3_BUCKET="${c_bucket:-$S3_BUCKET}"
+    S3_ACCESS_KEY="${c_ak:-$S3_ACCESS_KEY}" S3_SECRET_KEY="${c_sk:-$S3_SECRET_KEY}"
+    DOC_HOST="${c_host:-$DOC_HOST}" DOC_SSH_KEY="${c_key:-$DOC_SSH_KEY}"
+    info "Files and Objects settings from stage 3 (${SECRET})"
+  fi
+  if [ "$RECONFIGURE" -eq 1 ] && [ -z "$CONFIG" ]; then
+    S3_ACCESS_KEY=""
+    S3_SECRET_KEY=""
+  fi
+  if [ "$RECONFIGURE" -eq 1 ] || [ -z "$NFS_EXPORT" ] || [ -z "$S3_ENDPOINT" ] \
+      || [ -z "$S3_ACCESS_KEY" ] || [ -z "$S3_SECRET_KEY" ]; then
+    info "The API pods take the document role: they mount the share and hold the Objects keys."
+    ask NFS_EXPORT "NFS export, host:/path (the same one the document VM uses)"
+    ask S3_ENDPOINT "Objects endpoint URL"
+    ask S3_BUCKET "Bucket" claims
+    ask_echo S3_ACCESS_KEY "Objects access key"
+    ask_echo S3_SECRET_KEY "Objects secret key"
+  fi
+  valid_nfs_export "$NFS_EXPORT" \
+    || die "NFS export must look like labFS.ntnxlab.local:/documents or 10.10.140.11:/claims-docs"
+  S3_ENDPOINT="${S3_ENDPOINT%/}"
+  [[ "$S3_ENDPOINT" =~ ^https?://[^[:space:]]+$ ]] || die "Objects endpoint must be an http(s) URL"
+  [[ "$S3_BUCKET" =~ ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$ ]] || die "bucket name '$S3_BUCKET' is not a DNS-style bucket name"
+  if [ -z "$S3_ACCESS_KEY" ] || [ -z "$S3_SECRET_KEY" ]; then
+    die "Objects access key and secret key are required"
+  fi
+  S3_REGION="${S3_REGION:-us-east-1}"
+
+  # Kubelet mounts the export on the node, and the node may not resolve the lab zone.
+  NFS_SERVER="${NFS_EXPORT%%:*}"
+  NFS_PATH="${NFS_EXPORT#*:}"
+  if ! valid_ipv4 "$NFS_SERVER"; then
+    local ip=""
+    ip="$(getent ahostsv4 "$NFS_SERVER" 2>/dev/null | awk 'NR==1 {print $1}' || true)"
+    if valid_ipv4 "$ip"; then
+      info "NFS server ${NFS_SERVER} is ${ip}; the pods mount it by address"
+      NFS_SERVER="$ip"
+    else
+      warn "cannot resolve ${NFS_SERVER} here. The nodes must resolve it."
+    fi
+  fi
+
+  if [ -z "$STAGE4_RUN_AS_UID" ] && [ -n "$DOC_HOST" ]; then
+    if [ -z "$DOC_SSH_KEY" ] && [ -f /root/.ssh/claims-desk-lab ]; then
+      DOC_SSH_KEY=/root/.ssh/claims-desk-lab
+    fi
+    local ids=""
+    ids="$(DOC_SSH_PASSWORD="" ssh_run 'id -u claimsdesk; id -g claimsdesk' 2>/dev/null | tr '\n' ' ' || true)"
+    if [[ "$ids" =~ ^([0-9]+)\ ([0-9]+) ]]; then
+      STAGE4_RUN_AS_UID="${BASH_REMATCH[1]}"
+      STAGE4_RUN_AS_GID="${BASH_REMATCH[2]}"
+      info "claimsdesk on the document VM is uid ${STAGE4_RUN_AS_UID}, gid ${STAGE4_RUN_AS_GID}; the pods use the same"
+    fi
+  fi
+  if [ -z "$STAGE4_RUN_AS_UID" ]; then
+    info "NFSv3 sends the numeric uid. Use the uid that owns the files on the share."
+    ask STAGE4_RUN_AS_UID "uid for the pods" 10001
+  fi
+  [[ "$STAGE4_RUN_AS_UID" =~ ^[1-9][0-9]*$ ]] || die "uid must be a positive number (the pods do not run as root)"
+  STAGE4_RUN_AS_GID="${STAGE4_RUN_AS_GID:-$STAGE4_RUN_AS_UID}"
+  [[ "$STAGE4_RUN_AS_GID" =~ ^[0-9]+$ ]] || die "gid must be a number"
+
+  if [ -n "$STAGE4_LB_IP" ]; then
+    valid_ipv4 "$STAGE4_LB_IP" || die "STAGE4_LB_IP must be an IPv4 address"
+  fi
+  [[ "$K8S_NAMESPACE" =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$ ]] || die "namespace '${K8S_NAMESPACE}' is not a valid name"
+}
+
+# Secret from stdin, never on a command line or in a file. Prints a short hash of it.
+stage4_secret() {
+  kc get namespace "$K8S_NAMESPACE" >/dev/null 2>&1 || kc create namespace "$K8S_NAMESPACE" >/dev/null
+  info "namespace ${K8S_NAMESPACE}"
+  local manifest
+  manifest="$(K8S_NAMESPACE="$K8S_NAMESPACE" DB_PASSWORD="$DB_PASSWORD" \
+    S3_ACCESS_KEY="$S3_ACCESS_KEY" S3_SECRET_KEY="$S3_SECRET_KEY" python3 - <<'PY'
+import hashlib, json, os
+data = {
+    "db-password": os.environ["DB_PASSWORD"],
+    "s3-access-key": os.environ["S3_ACCESS_KEY"],
+    "s3-secret-key": os.environ["S3_SECRET_KEY"],
+}
+digest = hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()[:12]
+print(digest)
+print(json.dumps({
+    "apiVersion": "v1", "kind": "Secret", "type": "Opaque",
+    "metadata": {"name": "claims-desk", "namespace": os.environ["K8S_NAMESPACE"],
+                 "labels": {"app.kubernetes.io/name": "claims-desk"}},
+    "stringData": data,
+}))
+PY
+)"
+  STAGE4_SECRET_HASH="${manifest%%$'\n'*}"
+  printf '%s\n' "${manifest#*$'\n'}" | kc apply -f - >/dev/null || die "could not write Secret claims-desk"
+  info "Secret claims-desk (database password, Objects keys)"
+}
+
+stage4_values() {
+  local out="$1" repo="" tag=""
+  tag="$(bundle_version)"
+  if [ -n "$IMAGE" ]; then
+    if [[ "${IMAGE##*/}" == *:* ]]; then
+      repo="${IMAGE%:*}"; tag="${IMAGE##*:}"
+    else
+      repo="$IMAGE"
+    fi
+  fi
+  REPO="$repo" TAG="$tag" DB_HOST="$DB_HOST" DB_PORT="$DB_PORT" DB_NAME="$DB_NAME" DB_USER="$DB_USER" \
+    DB_SSLMODE="$DB_SSLMODE" DB_SCHEMA="$DB_SCHEMA" NFS_SERVER="$NFS_SERVER" NFS_PATH="$NFS_PATH" \
+    S3_ENDPOINT="$S3_ENDPOINT" S3_BUCKET="$S3_BUCKET" S3_REGION="$S3_REGION" \
+    RUN_UID="$STAGE4_RUN_AS_UID" RUN_GID="$STAGE4_RUN_AS_GID" LB_IP="$STAGE4_LB_IP" \
+    SECRET_HASH="$STAGE4_SECRET_HASH" STAGE="$STAGE" POD_PORT="$POD_PORT" OUT="$out" python3 - <<'PY'
+import json, os
+e = os.environ
+image = {"tag": e["TAG"]}
+if e["REPO"]:
+    image["repository"] = e["REPO"]
+values = {
+    "image": image,
+    "stage": int(e["STAGE"]),
+    "secretHash": e["SECRET_HASH"],
+    "db": {"host": e["DB_HOST"], "port": int(e["DB_PORT"]), "name": e["DB_NAME"],
+           "user": e["DB_USER"], "sslmode": e["DB_SSLMODE"], "schema": e["DB_SCHEMA"] or "claimsdesk"},
+    "nfs": {"server": e["NFS_SERVER"], "path": e["NFS_PATH"]},
+    "s3": {"endpoint": e["S3_ENDPOINT"], "bucket": e["S3_BUCKET"], "region": e["S3_REGION"]},
+    "runAsUser": int(e["RUN_UID"]),
+    "runAsGroup": int(e["RUN_GID"]),
+    "service": {"port": int(e["POD_PORT"]), "loadBalancerIP": e["LB_IP"]},
+}
+with open(e["OUT"], "w") as fh:
+    json.dump(values, fh, indent=2)
+PY
+}
+
+stage4_diagnose() {
+  local sel="app.kubernetes.io/instance=${RELEASE}" events
+  warn "the API pods are not healthy. What the cluster says:"
+  kc -n "$K8S_NAMESPACE" get pods -l "$sel" -o wide 2>&1 | sed 's/^/   /' || true
+  events="$(kc -n "$K8S_NAMESPACE" get events --sort-by=.lastTimestamp 2>/dev/null | tail -n 15 || true)"
+  printf '%s\n' "$events" | sed 's/^/   /'
+  kc -n "$K8S_NAMESPACE" logs -l "$sel" --all-containers --tail=15 --prefix 2>/dev/null | sed 's/^/   /' || true
+  if printf '%s' "$events" | grep -Eq 'ErrImagePull|ImagePullBackOff|manifest unknown'; then
+    warn "image pull failed. The nodes need HTTPS to ghcr.io, and the image $(bundle_version) must be published (GitHub Actions on main or a tag). Set IMAGE= to use another one."
+  fi
+  if printf '%s' "$events" | grep -Eiq 'MountVolume|mount failed|access denied by server|nfs'; then
+    warn "NFS mount failed. The export ${NFS_SERVER}:${NFS_PATH} must allow the node IPs (${STAGE4_NODE_IPS:-see kubectl get nodes -o wide}) read-write, and TCP 2049 from the nodes."
+  fi
+}
+
+stage4_deploy() {
+  local values
+  values="$(mktemp /tmp/claims-desk-values.XXXXXX.json)"
+  stage4_values "$values"
+  info "helm upgrade --install ${RELEASE} (image tag $(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["image"]["tag"])' "$values"))"
+  if ! hm upgrade --install "$RELEASE" "$CHART" -n "$K8S_NAMESPACE" -f "$values" --wait --timeout 10m; then
+    rm -f "$values"
+    stage4_diagnose
+    die "helm could not bring the API pods up. Fix the cause above, then rerun: sudo $0 --stage ${STAGE}"
+  fi
+  rm -f "$values"
+  kc -n "$K8S_NAMESPACE" get pods -l "app.kubernetes.io/instance=${RELEASE}" -o wide | sed 's/^/   /'
+}
+
+stage4_wait_lb() {
+  local ip="" svc="${RELEASE}-api"
+  for _ in $(seq 1 60); do
+    ip="$(kc -n "$K8S_NAMESPACE" get svc "$svc" -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || true)"
+    [ -n "$ip" ] && break
+    sleep 2
+  done
+  [ -n "$ip" ] || die "Service ${svc} has no load balancer IP after 2 minutes. Check MetalLB: kubectl -n ${K8S_NAMESPACE} describe svc ${svc}"
+  POD_API_URL="http://${ip}:${POD_PORT}"
+  info "Service ${svc}: ${POD_API_URL}"
+}
+
+stage4_check() {
+  local body="" verdict="" ok=0
+  for _ in $(seq 1 30); do
+    if body="$(curl -fsS --max-time 10 "${POD_API_URL}/api/v1/info" 2>/dev/null)"; then
+      verdict="$(printf '%s' "$body" | python3 -c '
+import json, sys
+b = json.load(sys.stdin)
+problems = []
+if (b.get("runtime") or {}).get("kind") != "pod":
+    problems.append("runtime is not a pod")
+if (b.get("db") or {}).get("status") != "ok":
+    problems.append("db: " + str((b.get("db") or {}).get("error", "unavailable")))
+if (b.get("documents") or {}).get("status") != "ok":
+    problems.append("documents: " + str((b.get("documents") or {}).get("status") or (b.get("documents") or {}).get("error")))
+print("; ".join(problems) or "ok")
+' 2>/dev/null || echo "unreadable reply")"
+      if [ "$verdict" = "ok" ]; then ok=1; break; fi
+    fi
+    sleep 2
+  done
+  if [ "$ok" -ne 1 ]; then
+    if [ -z "$body" ]; then
+      die "this VM cannot reach ${POD_API_URL}. Open TCP ${POD_PORT} from the portal to the load balancer IP."
+    fi
+    case "$verdict" in
+      *db:*) warn "the pods cannot use PostgreSQL ${DB_HOST}:${DB_PORT}. Add the node IPs (${STAGE4_NODE_IPS:-see kubectl get nodes -o wide}) to pg_hba.conf, and allow TCP ${DB_PORT} from them." ;;
+    esac
+    case "$verdict" in
+      *documents:*) stage4_diagnose ;;
+    esac
+    die "API pods are not ready: ${verdict}"
+  fi
+  printf '%s' "$body" | python3 -c '
+import json, sys
+b = json.load(sys.stdin)
+r = b.get("runtime") or {}
+print("   pod   {} on node {} ({})".format(b["host"]["hostname"], r.get("node", "?"), r.get("pod_ip", "?")))
+print("   db    {}:{} served by {}".format(b["db_endpoint"]["host"], b["db_endpoint"]["port"], b["db"].get("server_addr")))
+print("   docs  {} mounted, bucket {}".format(b["documents"]["nfs"]["export"], b["documents"]["s3"]["bucket"]))
+'
+}
+
+# Image tag of the running Deployment, empty when it is not deployed.
+stage4_deployed_tag() {
+  local img=""
+  img="$(kc -n "$K8S_NAMESPACE" get deploy "${RELEASE}-api" -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || true)"
+  [ -n "$img" ] && printf '%s' "${img##*:}"
+}
+
+stage4_wanted_tag() {
+  if [ -n "$IMAGE" ] && [[ "${IMAGE##*/}" == *:* ]]; then
+    printf '%s' "${IMAGE##*:}"
+  else
+    bundle_version
+  fi
+}
+
+portal_stage4() {
+  step "Cluster"
+  stage4_preflight
+  step "Settings for the API pods"
+  stage4_settings
+  echo
+  info "Cluster      $(kc config view --minify -o jsonpath='{.clusters[0].cluster.server}')  namespace ${K8S_NAMESPACE}"
+  info "Database     ${DB_HOST}:${DB_PORT}  database ${DB_NAME}  role ${DB_USER}"
+  info "Files        ${NFS_SERVER}:${NFS_PATH}  (NFSv3, pods run as uid ${STAGE4_RUN_AS_UID})"
+  info "Objects      ${S3_ENDPOINT}  bucket ${S3_BUCKET}"
+  info "Service      LoadBalancer :${POD_PORT}${STAGE4_LB_IP:+  IP ${STAGE4_LB_IP}}"
+  ask_yes "Deploy the API pods?" Y || die "cancelled"
+  save_stage4_state
+  step "Deploy"
+  stage4_secret
+  stage4_deploy
+  stage4_wait_lb
+  step "Check the pods from the portal"
+  stage4_check
+}
+
 docs_configured() {
   [ -f "$ETC/api.json" ] || return 1
   python3 -c 'import json,sys
@@ -625,6 +1041,25 @@ run_portal_install() {
   fi
 }
 
+# nginx publishes /api/ too. Stage 4 and 5 send it to the pods, lower stages to this VM.
+set_api_upstream() {
+  local stage="$1" target="127.0.0.1:8000" scheme=http conf="$NGINX_CONF"
+  [ -f "$conf" ] || return 0
+  if [ "$stage" -ge 4 ]; then
+    scheme="${POD_API_URL%%://*}"
+    target="${POD_API_URL#*://}"
+    target="${target%%/*}"
+    if [[ "$target" != *:* ]]; then
+      if [ "$scheme" = https ]; then target="${target}:443"; else target="${target}:80"; fi
+    fi
+  fi
+  sed -i -E \
+    -e "s#^( *upstream claims_api \\{ server )[^;]+;#\\1${target};#" \
+    -e "s#(location /api/ \\{ proxy_pass )https?://claims_api;#\\1${scheme}://claims_api;#" "$conf"
+  nginx -t -q || die "nginx configuration test failed after pointing /api/ at ${target}"
+  systemctl reload nginx
+}
+
 # Select the path and the diagram. Does not change the database address,
 # the document VM, or any pod deployment.
 apply_stage() {
@@ -642,7 +1077,7 @@ apply_stage() {
   if [ "$stage" -ge 4 ]; then
     [[ "$POD_API_URL" =~ ^https?://[^[:space:]]+$ ]] || die "API pod URL must be an http(s) URL"
   fi
-  CLAIMS_STAGE="$stage" POD_API_URL="$POD_API_URL" LOCAL_API_URL="$LOCAL_API_URL" python3 - <<'PY'
+  CLAIMS_STAGE="$stage" POD_API_URL="$POD_API_URL" LOCAL_API_URL="$LOCAL_API_URL" ETC="$ETC" python3 - <<'PY'
 import json, os
 stage = int(os.environ["CLAIMS_STAGE"])
 pod = os.environ.get("POD_API_URL") or ""
@@ -666,16 +1101,25 @@ elif pod:
     web_updates["pod_api_url"] = pod
 else:
     web_updates["api_url"] = local
-merge("/etc/claims-desk/api.json", {"stage": stage})
-merge("/etc/claims-desk/web.json", web_updates)
+merge(os.path.join(os.environ["ETC"], "api.json"), {"stage": stage})
+merge(os.path.join(os.environ["ETC"], "web.json"), web_updates)
 PY
   printf '%s\n' "$stage" > "$ETC/stage"
-  systemctl restart claims-api claims-web
+  set_api_upstream "$stage"
+  if [ "$stage" -ge 4 ]; then
+    # The pods are the only database client now; the portal middleware stays off.
+    systemctl disable -q --now claims-api 2>/dev/null || true
+    systemctl restart claims-web
+  else
+    systemctl enable -q claims-api
+    systemctl restart claims-api claims-web
+  fi
   info "active stage ${stage}. Database address unchanged."
   if [ "$stage" -ge 4 ]; then
-    info "web tier calls ${POD_API_URL}. Pods are left as they are."
+    info "web tier and /api/ call ${POD_API_URL}. Pods are left as they are."
+    info "claims-api on this VM is stopped: the portal no longer connects to PostgreSQL."
   else
-    info "web tier calls ${LOCAL_API_URL}."
+    info "web tier calls ${LOCAL_API_URL}. claims-api on this VM is running."
   fi
   if [ "$stage" -lt 3 ]; then
     info "document VM is not on this path. Its configuration is unchanged."
@@ -684,8 +1128,10 @@ PY
 
 if [ -n "$CONFIG" ]; then
   [ -f "$CONFIG" ] || die "config file not found: $CONFIG"
+  cli_kubeconfig="$KUBECONFIG_FILE"
   # shellcheck disable=SC1090
   . "$CONFIG"
+  KUBECONFIG_FILE="${cli_kubeconfig:-$KUBECONFIG_FILE}"
 fi
 
 case "$STAGE" in
@@ -716,9 +1162,52 @@ case "$STAGE" in
     ;;
   4|5)
     [ "$APPLY" -eq 0 ] || die "--apply-documents is only valid with --stage 3"
-    [[ "$STAGE" =~ ^[0-9]+$ ]] || die "stage must be a number"
-    run_portal_install quiet
+    [ "$(id -u)" -eq 0 ] || die "run as root: sudo $0 --stage ${STAGE}"
+    if [ "$(active_stage)" -ge 4 ] && [ "$RECONFIGURE" -eq 0 ]; then
+      # The portal may already be cut off from PostgreSQL by the stage 4 Flow policy.
+      CLAIMS_PORTAL_NO_DB=1 run_portal_install quiet
+    else
+      run_portal_install quiet
+    fi
+    exec > >(tee -a "$LOG") 2>&1
+    load_stage4_state
+    [ -n "$POD_API_URL" ] || POD_API_URL="$(saved_pod_url)"
+    DEPLOYED=0
+    if ! have_kubeconfig && [ -n "$POD_API_URL" ]; then
+      info "no kubeconfig: selecting the saved API pod URL ${POD_API_URL} without checking the cluster"
+    else
+      step "Kubernetes tools"
+      save_kubeconfig
+      install_k8s_tools
+      current_tag="$(stage4_deployed_tag || true)"
+      wanted_tag="$(stage4_wanted_tag)"
+      if [ "$RECONFIGURE" -eq 1 ] || [ -z "$current_tag" ]; then
+        portal_stage4
+        DEPLOYED=1
+      elif [ "$current_tag" != "$wanted_tag" ]; then
+        info "API pods run ${current_tag}; this bundle is ${wanted_tag}. Upgrading them."
+        portal_stage4
+        DEPLOYED=1
+      else
+        info "API pods ${current_tag} are deployed in namespace ${K8S_NAMESPACE}. Selecting them (--reconfigure redeploys)."
+        stage4_wait_lb
+      fi
+    fi
     apply_stage "$STAGE"
+    if [ "$DEPLOYED" -eq 1 ]; then
+      name="$(hostname -f 2>/dev/null || hostname)"
+      cat <<EOF
+
+$(printf '\033[1;32m')Claims Desk stage ${STAGE} is running on the API pods.$(printf '\033[0m')
+
+  Portal        https://${name}/
+  Architecture  https://${name}/about
+  API pods      ${POD_API_URL}/api/v1/info   (namespace ${K8S_NAMESPACE}, release ${RELEASE})
+  Node IPs      ${STAGE4_NODE_IPS:-see kubectl get nodes -o wide}: allowed in pg_hba.conf and on the NFS export
+  Kubeconfig    ${KUBECONFIG_SAVED} (root only)
+  Back to VMs   sudo $0 --stage 3   (pods keep running; the portal middleware takes over)
+EOF
+    fi
     ;;
   *)
     die "stage must be 1, 2, 3, 4, or 5"
