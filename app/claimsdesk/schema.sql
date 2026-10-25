@@ -1,13 +1,12 @@
 -- Claims Desk: one table. Runs as the application role, inside its own schema,
 -- so it works whether the database was created by install.sh or by NDB.
--- Safe to re-run.
+-- Safe to re-run. PostgreSQL 10 or later.
 
 CREATE TABLE IF NOT EXISTS claims (
     id              bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    claim_number    text GENERATED ALWAYS AS (
-                        'CLM-' || CASE WHEN id < 1000000 THEN lpad(id::text, 6, '0')
-                                       ELSE id::text END
-                    ) STORED,
+    -- Set by trigger claims_claim_number. Tables created by 0.3.0 and earlier
+    -- have a generated column here instead, which needs PostgreSQL 12.
+    claim_number    text          NOT NULL,
     policy_number   text          NOT NULL,
     claimant_name   text          NOT NULL,
     contact_email   text,
@@ -31,3 +30,24 @@ CREATE TABLE IF NOT EXISTS claims (
 
 CREATE INDEX IF NOT EXISTS claims_status_idx     ON claims (status);
 CREATE INDEX IF NOT EXISTS claims_created_at_idx ON claims (created_at DESC);
+
+CREATE OR REPLACE FUNCTION claims_claim_number() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    NEW.claim_number := 'CLM-' || CASE WHEN NEW.id < 1000000 THEN lpad(NEW.id::text, 6, '0')
+                                       ELSE NEW.id::text END;
+    RETURN NEW;
+END
+$$;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_trigger
+                   WHERE tgname = 'claims_claim_number' AND tgrelid = 'claims'::regclass)
+       AND EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_schema = current_schema() AND table_name = 'claims'
+                     AND column_name = 'claim_number' AND is_generated = 'NEVER') THEN
+        CREATE TRIGGER claims_claim_number BEFORE INSERT ON claims
+            FOR EACH ROW EXECUTE PROCEDURE claims_claim_number();
+    END IF;
+END
+$$;

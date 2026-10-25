@@ -43,7 +43,7 @@ The web tier never connects to the database; only the middleware does. That is w
 
 | Item | Requirement |
 | :--- | :--- |
-| Engine | PostgreSQL 12 or later (the table uses a generated column). CI tests against 16 |
+| Engine | PostgreSQL 10 or later. CI tests against 16 |
 | Provisioning | NDB single instance for stage 1. For NDB PostgreSQL HA, use the HAProxy address and port 5000 |
 | Credentials | **Either** an admin account (NDB: user `postgres` and the database password set at provisioning), so the installer creates the role and database, **or** an existing database and role that has `CREATE` on that database |
 | Access | `pg_hba.conf` must allow the portal VM's address with password authentication (`scram-sha-256` or `md5`) |
@@ -94,15 +94,15 @@ On another admin machine, copy the private key to `~/.ssh/claims-desk-lab` (mode
 
 ### 1. Get the bundle onto the VM
 
-With the portal cloud-init, the VM has already downloaded and extracted it to `/opt/claims-desk-bundle/claims-desk-demo-0.3.0` (re-run with `sudo claims-desk-fetch-bundle`). Otherwise, on the VM:
+With the portal cloud-init, the VM has already downloaded and extracted it to `/opt/claims-desk-bundle/claims-desk-demo-0.3.1` (re-run with `sudo claims-desk-fetch-bundle`). Otherwise, on the VM:
 
-**Offline bundle (recommended).** Includes the Python wheels for Rocky 9, so the VM needs only its dnf repositories. The asset is attached when `v0.3.0` is tagged; until then copy this directory to the VM.
+**Offline bundle (recommended).** Includes the Python wheels for Rocky 9, so the VM needs only its dnf repositories. The asset is attached when `v0.3.1` is tagged; until then copy this directory to the VM.
 
 ```bash
-REL=https://github.com/apjgase/claims-desk-demo/releases/download/v0.3.0
-curl -fLO $REL/claims-desk-demo-0.3.0.tar.gz -fLO $REL/claims-desk-demo-0.3.0.tar.gz.sha256
-sha256sum -c claims-desk-demo-0.3.0.tar.gz.sha256
-tar -xzf claims-desk-demo-0.3.0.tar.gz && cd claims-desk-demo-0.3.0
+REL=https://github.com/apjgase/claims-desk-demo/releases/download/v0.3.1
+curl -fLO $REL/claims-desk-demo-0.3.1.tar.gz -fLO $REL/claims-desk-demo-0.3.1.tar.gz.sha256
+sha256sum -c claims-desk-demo-0.3.1.tar.gz.sha256
+tar -xzf claims-desk-demo-0.3.1.tar.gz && cd claims-desk-demo-0.3.1
 ```
 
 Without internet on the VM, download it elsewhere (GitHub, **Releases**) and copy it with `scp`.

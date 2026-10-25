@@ -103,6 +103,30 @@ def test_api_flow(api_client):
     assert api_client.post("/api/v1/claims", json={**new, "loss_type": "Boat"}).status_code == 422
 
 
+def test_migrate_keeps_generated_claim_number(database):
+    import psycopg
+    os.environ["CLAIMS_DB_NAME"] = "claims_upgrade"
+    info = dict(host=_SOCKET, port=ENV["CLAIMS_DB_PORT"], dbname="claims_upgrade",
+                user="claims_app", password=ENV["CLAIMS_DB_PASSWORD"], autocommit=True)
+    try:
+        admin("bootstrap")
+        with psycopg.connect(**info) as conn:
+            conn.execute("CREATE SCHEMA IF NOT EXISTS claimsdesk; SET search_path TO claimsdesk; "
+                         "CREATE TABLE claims (id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, "
+                         "claim_number text GENERATED ALWAYS AS ('CLM-' || lpad(id::text, 6, '0')) STORED, "
+                         "status text NOT NULL DEFAULT 'SUBMITTED', created_at timestamptz NOT NULL DEFAULT now())")
+        admin("migrate")
+        admin("migrate")
+        with psycopg.connect(**info) as conn:
+            conn.execute("SET search_path TO claimsdesk")
+            assert conn.execute("SELECT count(*) FROM pg_trigger WHERE tgname = 'claims_claim_number'"
+                                ).fetchone()[0] == 0
+            assert conn.execute("INSERT INTO claims DEFAULT VALUES RETURNING claim_number"
+                                ).fetchone()[0] == "CLM-000001"
+    finally:
+        os.environ["CLAIMS_DB_NAME"] = ENV["CLAIMS_DB_NAME"]
+
+
 def test_web_flow(web_client):
     r = web_client.get("/")
     assert r.status_code == 200 and "CLM-000001" in r.text

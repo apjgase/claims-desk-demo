@@ -122,14 +122,21 @@ def _app_conn(cfg, **kw):
 def migrate(cfg) -> None:
     schema = cfg["db_schema"]
     with _app_conn(cfg, options=None) as conn:
+        version = conn.execute("SHOW server_version").fetchone()[0]
+        if conn.info.server_version < 100000:
+            _fail("PostgreSQL {} on {}:{} is too old: Claims Desk needs 10 or later".format(
+                version, cfg["db_host"], cfg["db_port"]))
         try:
             conn.execute(sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(sql.Identifier(schema)))
             conn.execute(sql.SQL("SET search_path TO {}").format(sql.Identifier(schema)))
             conn.execute((HERE / "schema.sql").read_text())
-        except psycopg.Error as exc:
+        except psycopg.errors.InsufficientPrivilege as exc:
             _fail("schema setup failed as {}: {}. The app user needs CREATE on database {} "
                   "(run bootstrap with an admin user).".format(cfg["db_user"], _first_line(exc),
                                                                 cfg["db_name"]))
+        except psycopg.Error as exc:
+            _fail("schema setup failed as {} on PostgreSQL {}: {}".format(
+                cfg["db_user"], version, _first_line(exc)))
         n = conn.execute("SELECT count(*) FROM claims").fetchone()[0]
     print("schema {}: table claims ready ({} rows)".format(schema, n))
 

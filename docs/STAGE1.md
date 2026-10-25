@@ -26,7 +26,7 @@ One table, `claimsdesk.claims`:
 | Column | Type | Notes |
 | :--- | :--- | :--- |
 | `id` | bigint identity | Primary key |
-| `claim_number` | text, generated | `CLM-000001` …, unique |
+| `claim_number` | text, set by an insert trigger from `id` | `CLM-000001` …, unique |
 | `policy_number` | text | Required |
 | `claimant_name` | text | Required |
 | `contact_email` | text | Optional |
