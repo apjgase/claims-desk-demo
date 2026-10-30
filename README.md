@@ -77,7 +77,7 @@ In a Flow policy for `AppTier: Web`, the outbound rule to the database is the on
 
 In Prism Central: **Create VM → Guest Customization → Cloud-init (Linux) → Custom Script**, and paste the file after editing the lines marked `EDIT` (host name, FQDN, `lab01` address). The lab SSH key is already in it. The VM needs dnf repository access during first boot. It is ready when `/var/lib/claims-desk/vm-ready` exists; first-boot output is in `/var/log/cloud-init-output.log`. With the packages already present, `install.sh` skips dnf, reports SELinux and firewalld as disabled, and needs no repository access.
 
-At first boot it also downloads the offline bundle from the GitHub release and extracts it to `/opt/claims-desk-bundle`. Without internet, set `BUNDLE_URL` in the file to an internal copy, or to `""`.
+At first boot it also downloads the offline bundle from the latest GitHub release, checks it against the published `.sha256`, and extracts it to `/opt/claims-desk-bundle`. Set `BUNDLE_TAG` in the file to pin a release (for example `v0.3.1`). Without internet, set `BUNDLE_URL` to an internal copy with its `.sha256` next to it (or set `BUNDLE_SHA256`), or to `""` to copy the bundle with `scp`. If the download or the checksum fails, `vm-ready` is not written, `cloud-init status` reports an error, and `/var/lib/claims-desk/bundle-failed` says why; fix the cause and run `sudo claims-desk-fetch-bundle`.
 
 ### Lab SSH key
 
@@ -94,7 +94,7 @@ On another admin machine, copy the private key to `~/.ssh/claims-desk-lab` (mode
 
 ### 1. Get the bundle onto the VM
 
-With the portal cloud-init, the VM has already downloaded and extracted it to `/opt/claims-desk-bundle/claims-desk-demo-0.3.1` (re-run with `sudo claims-desk-fetch-bundle`). Otherwise, on the VM:
+With the portal cloud-init, the VM has already downloaded, verified, and extracted the latest release to `/opt/claims-desk-bundle/claims-desk-demo-<version>` (re-run with `sudo claims-desk-fetch-bundle`). Otherwise, on the VM:
 
 **Offline bundle (recommended).** Includes the Python wheels for Rocky 9, so the VM needs only its dnf repositories. The asset is attached when `v0.3.1` is tagged; until then copy this directory to the VM.
 

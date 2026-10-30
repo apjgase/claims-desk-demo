@@ -245,11 +245,12 @@ write_files:
       kubectl completion bash > /etc/bash_completion.d/kubectl
       /usr/local/bin/helm completion bash > /etc/bash_completion.d/helm
       echo "== versions"
-      kubectl version --client 2>/dev/null | head -1
+      # sed -n 1p reads all input; head -1 exits early and, with pipefail, SIGPIPE fails the script.
+      kubectl version --client 2>/dev/null | sed -n 1p
       /usr/local/bin/helm version --short
       /usr/local/bin/aws --version
-      /usr/local/bin/k9s version -s 2>/dev/null | head -1 || true
-      gh --version | head -1
+      /usr/local/bin/k9s version -s 2>/dev/null | sed -n 1p || true
+      gh --version | sed -n 1p
       echo "nkp CLI: download the NKP bundle from the Nutanix portal (sign-in required) and copy nkp to /usr/local/bin"
   - path: /etc/profile.d/claims-lab.sh
     permissions: "0644"

@@ -8,7 +8,8 @@
 # Stage 3, from this same bundle: sudo ./update.sh --stage 3.
 #
 # Progress on the VM: sudo tail -f /var/log/cloud-init-output.log
-# Done when the VM has rebooted and /var/lib/claims-desk/vm-ready exists.
+# Done when the VM has rebooted and /var/lib/claims-desk/vm-ready exists. If the bundle
+# download fails, vm-ready is missing and /var/lib/claims-desk/bundle-failed says why.
 
 hostname: portal01                          # EDIT
 fqdn: portal01.ntnxlab.local                # EDIT
@@ -114,25 +115,78 @@ write_files:
     content: |
       [main]
       dns=none
-  # Downloads the offline bundle at first boot from the public GitHub release. Without
-  # internet, set BUNDLE_URL to an internal copy, or to "" and copy the bundle with scp.
-  # Re-run by hand with: sudo claims-desk-fetch-bundle
+  # Downloads the offline bundle at first boot from the latest public GitHub release,
+  # checks its SHA-256, and extracts it. BUNDLE_TAG pins a release. Without internet, set
+  # BUNDLE_URL to an internal copy (with <url>.sha256 next to it, or set BUNDLE_SHA256),
+  # or to "" and copy the bundle with scp. On failure, /var/lib/claims-desk/bundle-failed
+  # says why and vm-ready is not written. Re-run by hand with: sudo claims-desk-fetch-bundle
   - path: /usr/local/sbin/claims-desk-fetch-bundle
     permissions: "0755"
     content: |
       #!/bin/bash
       set -euo pipefail
-      BUNDLE_URL="${BUNDLE_URL-https://github.com/apjgase/claims-desk-demo/releases/download/v0.3.1/claims-desk-demo-0.3.1.tar.gz}"   # EDIT (optional)
-      [ -n "$BUNDLE_URL" ] || { echo "no BUNDLE_URL set; copy the bundle with scp"; exit 0; }
+      REPO=apjgase/claims-desk-demo
+      BUNDLE_TAG="${BUNDLE_TAG:-latest}"        # EDIT (optional): a release tag, e.g. v0.3.1
+      BUNDLE_URL="${BUNDLE_URL-github}"         # EDIT (optional): internal copy, or "" for scp
+      BUNDLE_SHA256="${BUNDLE_SHA256:-}"        # EDIT (optional): when no <url>.sha256 is published
+      state=/var/lib/claims-desk
       dest=/opt/claims-desk-bundle
-      mkdir -p "$dest"
-      if ! curl -fsSL --retry 3 --connect-timeout 10 --max-time 300 "$BUNDLE_URL" -o /tmp/claims-desk-bundle.tar.gz; then
-        echo "could not download $BUNDLE_URL; copy the bundle with scp, or re-run claims-desk-fetch-bundle"
+      mkdir -p "$state" "$dest"
+
+      fail() {
+        echo "ERROR: $*" | tee "$state/bundle-failed" >&2
+        echo "fix the cause, then re-run: sudo claims-desk-fetch-bundle" >&2
+        exit 1
+      }
+      # vm-ready needs the rest of first boot too; runcmd writes prep-done before calling this.
+      ready() {
+        rm -f "$state/bundle-failed"
+        if [ -f "$state/prep-done" ]; then date -Is > "$state/vm-ready"; fi
+      }
+
+      if [ -z "$BUNDLE_URL" ]; then
+        echo "BUNDLE_URL is empty: copy the bundle with scp"
+        ready
         exit 0
       fi
-      tar -xzf /tmp/claims-desk-bundle.tar.gz -C "$dest"
-      rm -f /tmp/claims-desk-bundle.tar.gz
-      echo "bundle extracted to $dest; run: cd $dest/claims-desk-demo-* && sudo ./update.sh --stage 1"
+
+      if [ "$BUNDLE_URL" = github ]; then
+        if [ "$BUNDLE_TAG" = latest ]; then
+          api="https://api.github.com/repos/${REPO}/releases/latest"
+        else
+          api="https://api.github.com/repos/${REPO}/releases/tags/${BUNDLE_TAG}"
+        fi
+        release="$(curl -fsSL --retry 3 --connect-timeout 10 -H 'Accept: application/vnd.github+json' "$api")" \
+          || fail "could not read ${api}"
+        BUNDLE_URL="$(printf '%s' "$release" | python3 -c '
+      import json, re, sys
+      for asset in json.load(sys.stdin).get("assets", []):
+          if re.fullmatch(r"claims-desk-demo-[0-9][0-9A-Za-z.+-]*\.tar\.gz", asset["name"]):
+              print(asset["browser_download_url"])
+              break
+      ')" || BUNDLE_URL=""
+        [ -n "$BUNDLE_URL" ] || fail "release ${BUNDLE_TAG} of ${REPO} has no claims-desk-demo-*.tar.gz asset"
+      fi
+
+      if [ -z "$BUNDLE_SHA256" ]; then
+        BUNDLE_SHA256="$(curl -fsSL --retry 3 --connect-timeout 10 "${BUNDLE_URL}.sha256" | awk 'NR==1 {print $1}')" \
+          || fail "no checksum at ${BUNDLE_URL}.sha256. Publish one there, or set BUNDLE_SHA256."
+      fi
+      BUNDLE_SHA256="${BUNDLE_SHA256,,}"
+      [[ "$BUNDLE_SHA256" =~ ^[0-9a-f]{64}$ ]] || fail "checksum '${BUNDLE_SHA256}' is not a SHA-256 digest"
+
+      tmp="$(mktemp -d)"
+      trap 'rm -rf "$tmp"' EXIT
+      echo "downloading ${BUNDLE_URL}"
+      curl -fsSL --retry 3 --connect-timeout 10 --max-time 600 -o "$tmp/bundle.tar.gz" "$BUNDLE_URL" \
+        || fail "could not download ${BUNDLE_URL}"
+      echo "${BUNDLE_SHA256}  ${tmp}/bundle.tar.gz" | sha256sum --check --quiet \
+        || fail "checksum mismatch for ${BUNDLE_URL} (expected ${BUNDLE_SHA256})"
+      top="$(tar -tzf "$tmp/bundle.tar.gz" | sed -n '1s#/.*##p')" || fail "${BUNDLE_URL} is not a gzip tar"
+      [[ "$top" =~ ^claims-desk-demo-[0-9][0-9A-Za-z.+-]*$ ]] || fail "unexpected bundle layout: '${top}'"
+      tar -xzf "$tmp/bundle.tar.gz" -C "$dest" || fail "could not extract ${BUNDLE_URL}"
+      ready
+      echo "bundle verified and extracted; run: cd ${dest}/${top} && sudo ./update.sh --stage 1"
 
 runcmd:
   # Replace the NetworkManager symlink with a file. dns=none keeps DHCP from putting it back.
@@ -146,9 +200,11 @@ runcmd:
   - [sh, -c, "systemctl disable --now firewalld 2>/dev/null || true"]
   - [systemctl, mask, firewalld]
   - [sh, -c, "sshd -t && systemctl restart sshd"]
-  - [/usr/local/sbin/claims-desk-fetch-bundle]
   - [mkdir, -p, /var/lib/claims-desk]
-  - [sh, -c, "date -Is > /var/lib/claims-desk/vm-ready"]
+  - [sh, -c, "date -Is > /var/lib/claims-desk/prep-done"]
+  # Keep this last: its exit status is the runcmd result, so a failed bundle download
+  # shows as an error in cloud-init status. It writes vm-ready on success.
+  - [/usr/local/sbin/claims-desk-fetch-bundle]
 
 # Reboot once, to load the updated kernel and boot with selinux=0.
 power_state:
