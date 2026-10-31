@@ -74,6 +74,7 @@ LLM_VISION_MODEL="${LLM_VISION_MODEL:-}"
 LLM_VERIFY_TLS="${LLM_VERIFY_TLS:-}"
 CHAT_LB_IP="${CHAT_LB_IP:-}"
 CHAT_URL="${CHAT_URL:-}"
+STAGE5_SEED="${STAGE5_SEED:-1}"
 STAGE5_SECRET_HASH=""
 LOCAL_CHAT_UPSTREAM=127.0.0.1:8100
 
@@ -1182,6 +1183,16 @@ stage5_wait_lb() {
 
 chat_deployed() { kc -n "$K8S_NAMESPACE" get deploy "${RELEASE}-chat" >/dev/null 2>&1; }
 
+# Demo claims for the assistant, through the API pods. Every --stage 5 adds the ones that are
+# missing and keeps the rest; a lower stage leaves them in the database.
+stage5_seed() {
+  [ "$STAGE5_SEED" = 1 ] || { info "STAGE5_SEED=${STAGE5_SEED}: demo claims not checked"; return 0; }
+  step "Demo claims for the assistant"
+  CLAIMS_CONFIG="$ETC/api.json" CLAIMS_API_URL="$POD_API_URL" PYTHONPATH="$PREFIX/app" \
+    "$PREFIX/venv/bin/python" -m claimsdesk.seedfraud 2>&1 | sed 's/^/   /' \
+    || warn "demo claims were not added. Retry with: sudo claims-desk seed-fraud"
+}
+
 portal_stage5() {
   step "Assistant settings"
   load_stage5_state
@@ -1483,6 +1494,7 @@ case "$STAGE" in
       fi
     fi
     apply_stage "$STAGE"
+    if [ "$STAGE" -ge 5 ]; then stage5_seed; fi
     if [ "$CHAT_DEPLOYED" -eq 1 ]; then
       name="$(hostname -f 2>/dev/null || hostname)"
       cat <<EOF
@@ -1493,7 +1505,7 @@ $(printf '\033[1;32m')Claims Desk stage 5: the assistant is running on the chat 
   Chat pods     ${CHAT_URL}/health   (namespace ${K8S_NAMESPACE}, release ${RELEASE})
   Endpoint      ${LLM_BASE_URL}   models ${LLM_MODEL}, ${LLM_VISION_MODEL}
   API key       Secret ${CHAT_SECRET} in namespace ${K8S_NAMESPACE}; nowhere on this VM
-  Demo data     sudo claims-desk seed-fraud   (suspicious claims, photos, one changed after approval)
+  Demo data     added by every --stage 5 when missing; kept at lower stages (STAGE5_SEED=0 skips)
   Back          sudo $0 --stage 4   (hides the assistant; the chat pods keep running)
 EOF
     fi

@@ -77,7 +77,7 @@ In a Flow policy for `AppTier: Web`, the outbound rule to the database is the on
 
 In Prism Central: **Create VM → Guest Customization → Cloud-init (Linux) → Custom Script**, and paste the file after editing the lines marked `EDIT` (host name, FQDN, `lab01` address). The lab SSH key is already in it. The VM needs dnf repository access during first boot. It is ready when `/var/lib/claims-desk/vm-ready` exists; first-boot output is in `/var/log/cloud-init-output.log`. With the packages already present, `install.sh` skips dnf, reports SELinux and firewalld as disabled, and needs no repository access.
 
-At first boot it also downloads the offline bundle from the latest GitHub release, checks it against the published `.sha256`, and extracts it to `/opt/claims-desk-bundle`. Set `BUNDLE_TAG` in the file to pin a release (for example `v0.4.0`). Without internet, set `BUNDLE_URL` to an internal copy with its `.sha256` next to it (or set `BUNDLE_SHA256`), or to `""` to copy the bundle with `scp`. If the download or the checksum fails, `vm-ready` is not written, `cloud-init status` reports an error, and `/var/lib/claims-desk/bundle-failed` says why; fix the cause and run `sudo claims-desk-fetch-bundle`.
+At first boot it also downloads the offline bundle from the latest GitHub release, checks it against the published `.sha256`, and extracts it to `/opt/claims-desk-bundle`. Set `BUNDLE_TAG` in the file to pin a release (for example `v0.4.1`). Without internet, set `BUNDLE_URL` to an internal copy with its `.sha256` next to it (or set `BUNDLE_SHA256`), or to `""` to copy the bundle with `scp`. If the download or the checksum fails, `vm-ready` is not written, `cloud-init status` reports an error, and `/var/lib/claims-desk/bundle-failed` says why; fix the cause and run `sudo claims-desk-fetch-bundle`.
 
 ### Lab SSH key
 
@@ -96,13 +96,13 @@ On another admin machine, copy the private key to `~/.ssh/claims-desk-lab` (mode
 
 With the portal cloud-init, the VM has already downloaded, verified, and extracted the latest release to `/opt/claims-desk-bundle/claims-desk-demo-<version>` (re-run with `sudo claims-desk-fetch-bundle`). Otherwise, on the VM:
 
-**Offline bundle (recommended).** Includes the Python wheels for Rocky 9, so the VM needs only its dnf repositories. The asset is attached when `v0.4.0` is tagged; until then copy this directory to the VM.
+**Offline bundle (recommended).** Includes the Python wheels for Rocky 9, so the VM needs only its dnf repositories. The asset is attached when `v0.4.1` is tagged; until then copy this directory to the VM.
 
 ```bash
-REL=https://github.com/apjgase/claims-desk-demo/releases/download/v0.4.0
-curl -fLO $REL/claims-desk-demo-0.4.0.tar.gz -fLO $REL/claims-desk-demo-0.4.0.tar.gz.sha256
-sha256sum -c claims-desk-demo-0.4.0.tar.gz.sha256
-tar -xzf claims-desk-demo-0.4.0.tar.gz && cd claims-desk-demo-0.4.0
+REL=https://github.com/apjgase/claims-desk-demo/releases/download/v0.4.1
+curl -fLO $REL/claims-desk-demo-0.4.1.tar.gz -fLO $REL/claims-desk-demo-0.4.1.tar.gz.sha256
+sha256sum -c claims-desk-demo-0.4.1.tar.gz.sha256
+tar -xzf claims-desk-demo-0.4.1.tar.gz && cd claims-desk-demo-0.4.1
 ```
 
 Without internet on the VM, download it elsewhere (GitHub, **Releases**) and copy it with `scp`.
@@ -156,7 +156,7 @@ sudo claims-desk status     # services and end-to-end health
 sudo claims-desk check      # log in to PostgreSQL as the app user; primary or replica
 sudo claims-desk info       # server details and claim counts (JSON)
 sudo claims-desk seed 20    # add sample claims
-sudo claims-desk seed-fraud # stage 5 demo: suspicious claims with photos (once)
+sudo claims-desk seed-fraud # stage 5 demo claims; adds only the missing ones
 sudo claims-desk reset      # delete every claim (asks first)
 sudo claims-desk logs 200   # nginx, claims-web, claims-api
 ```
@@ -341,7 +341,7 @@ It asks for the base URL, the two model names, and the API key (not echoed). TLS
 
 Unattended: add the stage 5 lines from [`claims-desk.conf.example`](claims-desk.conf.example) and give the key in the environment: `sudo LLM_API_KEY='…' ./update.sh --stage 5 --config claims-desk.conf -y`. The key is stored only in the Secret. Running `--stage 5` again selects the chat pods; `--reconfigure` asks for the settings and the key again. A stage 4 redeploy keeps the chat pods.
 
-For the demo, `sudo claims-desk seed-fraud` adds a few claims made to be found: two claimants sharing an email, a photo and a story; a repeat claim on the same policy whose photo does not show the loss; a photo taken a year before the loss; a late, very large travel claim; an ordinary control claim; and an approved claim whose amount is then changed in PostgreSQL behind the packet's back. That last step needs a database login from the portal, which the stage 4 Flow drop may block; the command then prints the UPDATE to run from a host that can.
+For the demo, every `--stage 5` run adds a few claims made to be found, if they are not there yet (`STAGE5_SEED=0` skips this; `sudo claims-desk seed-fraud` does the same by hand). Each one is matched on policy, claimant and description, so a rerun or a 5 → 4 → 5 round trip never duplicates them, and a lower stage leaves them in the database. The claims: two claimants sharing an email, a photo and a story; a repeat claim on the same policy whose photo does not show the loss; a photo taken a year before the loss; a late, very large travel claim; an ordinary control claim; and an approved claim whose amount is then changed in PostgreSQL behind the packet's back. That last step needs a database login from the portal, which the stage 4 Flow drop may block; the command then prints the UPDATE to run from a host that can. The change is made only when that claim is first created.
 
 ```bash
 sudo claims-desk status                               # includes the chat pods' health

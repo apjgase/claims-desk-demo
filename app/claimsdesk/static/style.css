@@ -135,11 +135,11 @@ footer .ver { margin-left: auto; }
 .chat-toggle { position: fixed; right: 1.5rem; bottom: 3.2rem; z-index: 20; border-radius: 22px;
                padding: 0.65rem 1.2rem; box-shadow: 0 4px 18px rgba(0, 0, 0, 0.45); }
 body.chat-open .chat-toggle { display: none; }
-.chat { position: fixed; top: 0; right: 0; bottom: 0; width: min(460px, 100vw); z-index: 30;
+.chat { position: fixed; top: 0; right: 0; bottom: 0; width: max(40vw, min(420px, 100vw)); z-index: 30;
         background: var(--panel); border-left: 2px solid var(--purple); display: none;
         flex-direction: column; box-shadow: -8px 0 24px rgba(0, 0, 0, 0.4); }
 body.chat-open .chat { display: flex; }
-@media (min-width: 1500px) { body.chat-open main { margin-right: 460px; } }
+@media (min-width: 1100px) { body.chat-open main { margin-right: 40vw; } }
 .chat-head { display: flex; align-items: center; gap: 0.6rem; padding: 0.8rem 1rem; border-bottom: 1px solid var(--edge); }
 .chat-head b { flex: 1; }
 .chat-head .model { font-family: var(--mono); font-size: 0.72rem; color: var(--dim); }
