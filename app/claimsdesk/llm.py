@@ -46,11 +46,13 @@ class Client:
             raise LLMError(_detail(response))
         return [m.get("id") for m in response.json().get("data", []) if isinstance(m, dict)]
 
-    async def complete(self, model: str, messages: List[Dict[str, Any]], max_tokens: int = 600) -> str:
-        """One non-streamed answer. Used for the photo description."""
-        body = {"model": model, "messages": messages, "max_tokens": max_tokens, "temperature": 0.2}
+    async def complete(self, model: str, messages: List[Dict[str, Any]], max_tokens: int = 600,
+                       temperature: float = 0.2, timeout: Optional[float] = None) -> str:
+        """One non-streamed answer. Used for the photo description and the scope check."""
+        body = {"model": model, "messages": messages, "max_tokens": max_tokens, "temperature": temperature}
+        extra = {"timeout": httpx.Timeout(timeout, connect=10)} if timeout else {}
         try:
-            response = await self._http.post("/chat/completions", json=body)
+            response = await self._http.post("/chat/completions", json=body, **extra)
         except httpx.HTTPError as exc:
             raise LLMError("cannot reach {} ({})".format(self.base_url, type(exc).__name__)) from exc
         if response.status_code >= 400:

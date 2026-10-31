@@ -73,6 +73,7 @@ LLM_MODEL="${LLM_MODEL:-}"
 LLM_VISION_MODEL="${LLM_VISION_MODEL:-}"
 LLM_VERIFY_TLS="${LLM_VERIFY_TLS:-}"
 CHAT_LB_IP="${CHAT_LB_IP:-}"
+CHAT_SCOPE_GUARD="${CHAT_SCOPE_GUARD:-}"
 CHAT_URL="${CHAT_URL:-}"
 STAGE5_SEED="${STAGE5_SEED:-1}"
 STAGE5_SECRET_HASH=""
@@ -1038,10 +1039,13 @@ portal_stage4() {
 
 load_stage5_state() {
   local base="$LLM_BASE_URL" m="$LLM_MODEL" vm="$LLM_VISION_MODEL" tls="$LLM_VERIFY_TLS" lb="$CHAT_LB_IP"
+  local guard="$CHAT_SCOPE_GUARD"
   if [ -f "$STAGE5_STATE" ]; then
     # shellcheck disable=SC1090
     . "$STAGE5_STATE"
   fi
+  CHAT_SCOPE_GUARD="${guard:-${CHAT_SCOPE_GUARD:-true}}"
+  [[ "$CHAT_SCOPE_GUARD" =~ ^(true|false)$ ]] || die "CHAT_SCOPE_GUARD must be true or false"
   LLM_BASE_URL="${base:-${LLM_BASE_URL:-}}"
   LLM_MODEL="${m:-${LLM_MODEL:-gpt-oss-120b}}"
   LLM_VISION_MODEL="${vm:-${LLM_VISION_MODEL:-gemma-4-26b-a4b}}"
@@ -1058,6 +1062,7 @@ save_stage5_state() {
     printf 'LLM_VISION_MODEL=%q\n' "$LLM_VISION_MODEL"
     printf 'LLM_VERIFY_TLS=%q\n' "$LLM_VERIFY_TLS"
     printf 'CHAT_LB_IP=%q\n' "$CHAT_LB_IP"
+    printf 'CHAT_SCOPE_GUARD=%q\n' "$CHAT_SCOPE_GUARD"
     printf 'STAGE5_SECRET_HASH=%q\n' "$STAGE5_SECRET_HASH"
   } > "$STAGE5_STATE"
   umask 022
@@ -1069,10 +1074,12 @@ stage5_chat_values() {
   (
     load_stage5_state
     BASE="$LLM_BASE_URL" MODEL="$LLM_MODEL" VMODEL="$LLM_VISION_MODEL" TLS="$LLM_VERIFY_TLS" \
-      LB="$CHAT_LB_IP" HASH="$STAGE5_SECRET_HASH" PORT="$POD_PORT" SECRET_NAME="$CHAT_SECRET" python3 -c '
+      LB="$CHAT_LB_IP" HASH="$STAGE5_SECRET_HASH" PORT="$POD_PORT" SECRET_NAME="$CHAT_SECRET" \
+      GUARD="$CHAT_SCOPE_GUARD" python3 -c '
 import json, os
 e = os.environ
 print(json.dumps({"enabled": True, "existingSecret": e["SECRET_NAME"], "secretHash": e["HASH"],
+                  "scopeGuard": e["GUARD"] == "true",
                   "llm": {"baseUrl": e["BASE"], "model": e["MODEL"], "visionModel": e["VMODEL"],
                           "verifyTls": e["TLS"] == "true"},
                   "service": {"port": int(e["PORT"]), "loadBalancerIP": e["LB"]}}))'
@@ -1164,7 +1171,8 @@ import json, sys
 b = json.load(sys.stdin)
 r, l = b.get("runtime") or {}, b.get("llm") or {}
 print("   pod   {} on node {} ({})".format(b["host"]["hostname"], r.get("node", "?"), r.get("pod_ip", "?")))
-print("   llm   {}  model {}  vision {}".format(l.get("base_url"), l.get("model"), l.get("vision_model")))
+print("   llm   {}  model {}  vision {}  scope guard {}".format(
+    l.get("base_url"), l.get("model"), l.get("vision_model"), l.get("scope_guard", "n/a")))
 print("   api   {}".format(b["api"]["url"]))
 '
 }

@@ -49,6 +49,8 @@ DEFAULTS: Dict[str, Any] = {
     "llm_api_key": "",
     "llm_model": "gpt-oss-120b",
     "llm_vision_model": "gemma-4-26b-a4b",
+    "llm_guard_model": "",  # empty = llm_vision_model
+    "chat_guard": True,
     "llm_verify_tls": True,
     "llm_timeout": 120.0,
     "llm_max_tokens": 1500,
@@ -56,7 +58,7 @@ DEFAULTS: Dict[str, Any] = {
 
 _INT = {"db_port", "db_connect_timeout", "db_pool_max", "stage", "llm_max_tokens"}
 _FLOAT = {"api_timeout", "docs_timeout", "llm_timeout"}
-_BOOL = {"s3_verify_tls", "llm_verify_tls"}
+_BOOL = {"s3_verify_tls", "llm_verify_tls", "chat_guard"}
 
 
 def _as_bool(value: Any) -> bool:

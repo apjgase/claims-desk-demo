@@ -47,6 +47,8 @@ spec:
             - {name: CLAIMS_LLM_BASE_URL, value: {{ required "chat.llm.baseUrl is required" .Values.chat.llm.baseUrl | quote }}}
             - {name: CLAIMS_LLM_MODEL, value: {{ .Values.chat.llm.model | quote }}}
             - {name: CLAIMS_LLM_VISION_MODEL, value: {{ .Values.chat.llm.visionModel | quote }}}
+            - {name: CLAIMS_LLM_GUARD_MODEL, value: {{ .Values.chat.llm.guardModel | default "" | quote }}}
+            - {name: CLAIMS_CHAT_GUARD, value: {{ .Values.chat.scopeGuard | quote }}}
             - {name: CLAIMS_LLM_VERIFY_TLS, value: {{ .Values.chat.llm.verifyTls | quote }}}
             - {name: CLAIMS_LLM_TIMEOUT, value: {{ .Values.chat.llm.timeout | quote }}}
             - name: CLAIMS_LLM_API_KEY
