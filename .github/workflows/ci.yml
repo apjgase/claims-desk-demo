@@ -30,6 +30,8 @@ jobs:
           grep -q 'kind: Deployment' /tmp/rendered.yaml
           grep -q 'type: LoadBalancer' /tmp/rendered.yaml
           grep -q 'kind: PersistentVolume$' /tmp/rendered.yaml
+          grep -q 'name: claims-desk-chat$' /tmp/rendered.yaml
+          grep -q 'key: llm-api-key' /tmp/rendered.yaml
       - name: ShellCheck (including scripts embedded in cloud-init)
         run: |
           shellcheck -x install.sh uninstall.sh update.sh deploy/claims-desk scripts/*.sh
@@ -68,10 +70,10 @@ jobs:
           echo "image=${image}" >> "$GITHUB_OUTPUT"
       - name: Build
         run: docker build -t "${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.version }}" .
-      - name: Smoke test (both services import, run as a non-root uid)
+      - name: Smoke test (every service imports, run as a non-root uid)
         run: |
           img="${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.version }}"
-          docker run --rm --user 1234 "$img" python -c "import claimsdesk.api, claimsdesk.docs; print('ok')"
+          docker run --rm --user 1234 "$img" python -c "import claimsdesk.api, claimsdesk.docs, claimsdesk.chat, claimsdesk.fraud; print('ok')"
           docker run -d --name docs -p 8090:8090 -e CLAIMS_NFS_MOUNT=/tmp "$img" \
             uvicorn claimsdesk.docs:app --host 0.0.0.0 --port 8090
           for _ in $(seq 1 20); do curl -fsS http://127.0.0.1:8090/health && break; sleep 1; done

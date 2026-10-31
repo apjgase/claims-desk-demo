@@ -137,6 +137,14 @@ class Client:
         self._raise(response)
         return False
 
+    def get_object(self, key: str) -> Optional[bytes]:
+        """Object body, or None when the key does not exist."""
+        response = self._request("GET", "/{}/{}".format(self.bucket, key))
+        if response.status_code == 404:
+            return None
+        self._raise(response)
+        return response.content
+
     def put_object(self, key: str, body: bytes, content_type: str) -> str:
         uri = "/{}/{}".format(self.bucket, key)
         response = self._request("PUT", uri, body, content_type)

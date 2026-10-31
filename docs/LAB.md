@@ -154,8 +154,10 @@ Licences have to cover: Flow Network Security and Flow Virtual Networking (VPC, 
 
 - [ ] NAI: licence, install, its own PostgreSQL from NDB for metadata (`nai_iep`, `nai_iam`) *verify the storage class NAI 2.8 needs*, `nai.claims.internal` with a lab CA certificate
 - [ ] Model provisioning demo: Hugging Face token, model import, endpoint creation. A GPU node pool is needed only if the endpoint is actually started in the lab
-- [ ] External inference endpoint: URL, model name, API key; the chat pods use these, and need outbound HTTPS through EgressIP and the DC edge
-- [ ] Flow policy: chat pods → external endpoint 443
+- [ ] External inference endpoint: OpenAI-compatible base URL (ending in `/v1`), API key, a chat model with tool calls (`gpt-oss-120b`) and a model that accepts images (`gemma-4-26b-a4b`); the chat pods use these, and need outbound HTTPS through EgressIP and the DC edge. The lab endpoint `ai.hpoc.nutanix.com` has a public certificate
+- [ ] One more MetalLB address for Service `claims-desk-chat` (TCP 8443)
+- [ ] Deploy: `sudo ./update.sh --stage 5` on the portal after stage 4 (README, Stage 5); demo data with `sudo claims-desk seed-fraud`
+- [ ] Flow policy: portal → chat pods 8443; chat pods → API pods 8443 (in-cluster Service); chat pods → external endpoint 443. Chat pods → PostgreSQL, Files and Objects stay dropped: they hold no credentials for them
 
 ### Stage 6: UAT through NCM Self-Service (slide 10)
 
@@ -181,5 +183,5 @@ Licences have to cover: Flow Network Security and Flow Virtual Networking (VPC, 
 | Helm chart: API deployment (api + docs containers), LoadBalancer Service on 8443, NFS volume, Secret reference, probes | 4 | done |
 | `update.sh --stage 4 --kubeconfig FILE`: kubectl and helm, Secret, deploy, end-to-end check, stage switching | 4 | done |
 | Ingress with a lab CA certificate, CA bundle in the pods, NDK Application, Flow CNI namespace mapping | 4 | |
-| Chat service with a client for the external inference endpoint | 5 | |
+| Chat service with a client for the external inference endpoint: read-only tools, rule-based fraud scoring, photo checks with a vision model, `update.sh --stage 5`, `claims-desk seed-fraud` | 5 | done |
 | Self-Service blueprint and runbooks, masking script, UAT values | 6 | |

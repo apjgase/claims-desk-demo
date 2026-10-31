@@ -85,6 +85,26 @@ def api_info() -> Optional[Dict[str, Any]]:
     return _info_cache["data"]
 
 
+_chat_cache: Dict[str, Any] = {"at": 0.0, "data": None}
+
+
+def chat_enabled() -> bool:
+    return config.stage_number(CFG) >= 5 and bool(str(CFG.get("chat_url") or "").strip())
+
+
+def chat_info() -> Optional[Dict[str, Any]]:
+    """The chat pods' /health, for the architecture page. None when unreachable."""
+    if not chat_enabled():
+        return None
+    if time.monotonic() - _chat_cache["at"] > 10:
+        try:
+            data = httpx.get(CFG["chat_url"].rstrip("/") + "/health", timeout=8).json()
+        except (httpx.HTTPError, ValueError):
+            data = None
+        _chat_cache.update(at=time.monotonic(), data=data)
+    return _chat_cache["data"]
+
+
 def _port(url: str) -> int:
     parts = urlparse(url)
     try:
@@ -107,6 +127,8 @@ def render(request: Request, name: str, status_code: int = 200, **ctx) -> HTMLRe
         info=api_info(),
         statuses=STATUSES,
         loss_types=LOSS_TYPES,
+        chat_enabled=chat_enabled(),
+        chat_url=CFG.get("chat_url") or "",
     )
     return templates.TemplateResponse(request, name, ctx, status_code=status_code)
 
@@ -220,4 +242,5 @@ def claim_status(request: Request, claim_number: str, status: str = Form(...)):
 @app.get("/about", response_class=HTMLResponse)
 def about(request: Request):
     _info_cache["data"] = None
-    return render(request, "about.html")
+    _chat_cache["at"] = 0.0
+    return render(request, "about.html", chat=chat_info())

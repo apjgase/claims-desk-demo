@@ -12,3 +12,11 @@ runAsGroup: 991
 service:
   loadBalancerIP: 10.10.120.150
 secretHash: ci
+stage: 5
+chat:
+  enabled: true
+  secretHash: ci
+  llm:
+    baseUrl: https://ai.example/enterpriseai/v1
+  service:
+    loadBalancerIP: 10.10.120.151

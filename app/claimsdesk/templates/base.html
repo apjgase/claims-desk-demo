@@ -42,7 +42,9 @@
   {% else %}
     <span class="tier down"><b>API</b> {{ api_url }} · unreachable</span>
   {% endif %}
+  {% if chat_enabled %}<span class="tier"><b>CHAT</b> /chat/ · {{ chat_url }}</span>{% endif %}
   <span class="ver">{{ stage }} · v{{ version }}</span>
 </footer>
+{% block scripts %}{% endblock %}
 </body>
 </html>

@@ -24,6 +24,7 @@ http {
 
     upstream claims_web { server @WEB_UPSTREAM@; keepalive 16; }
     upstream claims_api { server @API_UPSTREAM@; keepalive 16; }
+    upstream claims_chat { server @CHAT_UPSTREAM@; keepalive 8; }
 
     server {
         listen 80 default_server;
@@ -54,6 +55,14 @@ http {
 
         # The REST API is published as well, so the middleware can be shown with curl.
         location /api/ { proxy_pass http://claims_api; }
+        # Stage 5 chat pods. Answers stream as server-sent events, so no buffering.
+        location /chat/ {
+            proxy_pass http://claims_chat/;
+            proxy_buffering off;
+            proxy_cache off;
+            proxy_read_timeout 300s;
+            client_max_body_size 1m;
+        }
         location / { proxy_pass http://claims_web; }
     }
 }

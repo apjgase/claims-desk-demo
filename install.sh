@@ -340,6 +340,7 @@ step "nginx"
 [ -f /etc/nginx/nginx.conf.claims-desk.orig ] || cp -p /etc/nginx/nginx.conf /etc/nginx/nginx.conf.claims-desk.orig
 sed -e "s|@SERVER_NAME@|${SERVER_NAME}|g" -e "s|@TLS_CERT@|${CERT}|g" -e "s|@TLS_KEY@|${KEY}|g" \
     -e "s|@WEB_UPSTREAM@|127.0.0.1:8080|g" -e "s|@API_UPSTREAM@|127.0.0.1:8000|g" \
+    -e "s|@CHAT_UPSTREAM@|127.0.0.1:8100|g" \
     "$BUNDLE/deploy/nginx/nginx.conf.tmpl" > /etc/nginx/nginx.conf
 nginx -t -q || die "nginx configuration test failed"
 info "/etc/nginx/nginx.conf written (original kept as nginx.conf.claims-desk.orig)"

@@ -68,3 +68,14 @@ STAGE4_RUN_AS_GID=''     # empty = its gid, or the uid
 IMAGE=''                 # empty = ghcr.io/apjgase/claims-desk-demo:<bundle version>
 # KUBECTL_URL=''         # internal mirror for the kubectl binary
 # HELM_URL=''            # internal mirror for the helm linux-amd64 tarball
+
+# Stage 5, used by: sudo LLM_API_KEY='...' ./update.sh --stage 5 --config claims-desk.conf -y
+# Deploys the chat pods next to the API pods. They call an OpenAI-compatible endpoint
+# (NAI, vLLM). Give the API key in the environment or at the prompt, not in this file:
+# it is written only to Secret claims-desk-chat in K8S_NAMESPACE. The other settings
+# are kept in /root/.claims-desk/stage5 for the next run.
+LLM_BASE_URL=''          # ends in /v1, e.g. https://ai.example/enterpriseai/v1
+LLM_MODEL='gpt-oss-120b'         # chat model; must support tool calls
+LLM_VISION_MODEL='gemma-4-26b-a4b'   # photo descriptions; must accept images
+LLM_VERIFY_TLS='true'    # false for an endpoint with a lab CA certificate the image does not trust
+CHAT_LB_IP=''            # empty = MetalLB picks an address from its pool

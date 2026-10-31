@@ -28,7 +28,7 @@ DEFAULTS: Dict[str, Any] = {
     "api_timeout": 15.0,
     "site_name": "Claims Desk",
     "environment": "Prod",
-    # 1 portal, 3 document VM. Empty docs_url keeps stage 1 behaviour.
+    # 1 portal, 3 document VM, 4 API pods, 5 chat pods. Empty docs_url keeps stage 1 behaviour.
     "stage": 1,
     "docs_url": "",
     "docs_timeout": 60.0,
@@ -41,11 +41,22 @@ DEFAULTS: Dict[str, Any] = {
     "s3_secret_key": "",
     "s3_region": "us-east-1",
     "s3_verify_tls": False,
+    # Stage 5. The web tier only needs chat_url (shown on /about; the browser goes
+    # through nginx /chat/). The chat pods read the rest; they hold no database or S3 settings.
+    "chat_url": "",
+    "chat_api_url": "http://127.0.0.1:8000",
+    "llm_base_url": "",
+    "llm_api_key": "",
+    "llm_model": "gpt-oss-120b",
+    "llm_vision_model": "gemma-4-26b-a4b",
+    "llm_verify_tls": True,
+    "llm_timeout": 120.0,
+    "llm_max_tokens": 1500,
 }
 
-_INT = {"db_port", "db_connect_timeout", "db_pool_max", "stage"}
-_FLOAT = {"api_timeout", "docs_timeout"}
-_BOOL = {"s3_verify_tls"}
+_INT = {"db_port", "db_connect_timeout", "db_pool_max", "stage", "llm_max_tokens"}
+_FLOAT = {"api_timeout", "docs_timeout", "llm_timeout"}
+_BOOL = {"s3_verify_tls", "llm_verify_tls"}
 
 
 def _as_bool(value: Any) -> bool:

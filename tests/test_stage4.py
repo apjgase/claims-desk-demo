@@ -145,12 +145,17 @@ def _gnu_sed() -> bool:
         return False
 
 
-@pytest.mark.skipif(not _gnu_sed() or shutil.which("bash") is None,
-                    reason="update.sh uses GNU sed -i -E (Rocky Linux, CI)")
-def test_apply_stage_switches_3_4_3(tmp_path):
+needs_gnu = pytest.mark.skipif(not _gnu_sed() or shutil.which("bash") is None,
+                               reason="update.sh uses GNU sed -i -E (Rocky Linux, CI)")
+
+
+@pytest.fixture
+def apply_stage(tmp_path):
+    """run(stage, pod_url, chat_url) -> (web.json, nginx.conf, systemctl and nginx calls)."""
     script = (ROOT / "update.sh").read_text()
     functions = "".join(_extract(script, n) for n in
-                        ("info", "warn", "die", "ask", "saved_pod_url", "set_api_upstream", "apply_stage"))
+                        ("info", "warn", "die", "ask", "saved_pod_url", "saved_chat_url",
+                         "set_chat_upstream", "set_api_upstream", "apply_stage"))
     etc = tmp_path / "etc"
     etc.mkdir()
     (etc / "api.json").write_text(json.dumps({"db_host": "10.38.12.40", "docs_url": "http://10.1.1.8:8090"}))
@@ -158,7 +163,8 @@ def test_apply_stage_switches_3_4_3(tmp_path):
     nginx_conf = tmp_path / "nginx.conf"
     nginx_conf.write_text((ROOT / "deploy/nginx/nginx.conf.tmpl").read_text()
                           .replace("@API_UPSTREAM@", "127.0.0.1:8000")
-                          .replace("@WEB_UPSTREAM@", "127.0.0.1:8080"))
+                          .replace("@WEB_UPSTREAM@", "127.0.0.1:8080")
+                          .replace("@CHAT_UPSTREAM@", "127.0.0.1:8100"))
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     calls = tmp_path / "calls"
@@ -169,17 +175,29 @@ def test_apply_stage_switches_3_4_3(tmp_path):
     harness = tmp_path / "harness.sh"
     harness.write_text("set -euo pipefail\n" + functions + 'apply_stage "$1"\n')
 
-    def run(stage, pod_url=""):
+    def run(stage, pod_url="", chat_url="", ok=True):
         env = dict(os.environ, PATH="{}:{}".format(bin_dir, os.environ["PATH"]),
                    ETC=str(etc), NGINX_CONF=str(nginx_conf), LOCAL_API_URL="http://127.0.0.1:8000",
-                   POD_API_URL=pod_url, INTERACTIVE="0")
+                   LOCAL_CHAT_UPSTREAM="127.0.0.1:8100", POD_API_URL=pod_url, CHAT_URL=chat_url,
+                   BUNDLE=str(ROOT), INTERACTIVE="0")
         done = subprocess.run(["bash", str(harness), str(stage)],
                               env=env, capture_output=True, text=True)
+        if not ok:
+            assert done.returncode != 0
+            return done.stdout + done.stderr
         assert done.returncode == 0, done.stdout + done.stderr
-        calls_text = calls.read_text()
+        calls_text = calls.read_text() if calls.exists() else ""
         calls.write_text("")
         return (json.loads((etc / "web.json").read_text()), nginx_conf.read_text(), calls_text)
 
+    run.etc = etc
+    run.nginx_conf = nginx_conf
+    return run
+
+
+@needs_gnu
+def test_apply_stage_switches_3_4_3(apply_stage):
+    run, etc = apply_stage, apply_stage.etc
     web, conf, sysd = run(3)
     assert web["api_url"] == "http://127.0.0.1:8000" and web["stage"] == 3
     assert "server 127.0.0.1:8000;" in conf
@@ -198,3 +216,28 @@ def test_apply_stage_switches_3_4_3(tmp_path):
     assert "upstream claims_api { server 127.0.0.1:8000;" in conf
     assert "enable -q claims-api" in sysd and "restart claims-api claims-web" in sysd
     assert json.loads((etc / "api.json").read_text())["docs_url"] == "http://10.1.1.8:8090"
+    assert "upstream claims_chat { server 127.0.0.1:8100;" in conf
+
+
+@needs_gnu
+def test_apply_stage_switches_4_5_4(apply_stage):
+    run = apply_stage
+    pods = "http://10.10.120.150:8443"
+    assert "no chat pod URL" in run(5, pods, ok=False)
+
+    web, conf, _ = run(5, pods, "http://10.10.120.151:8443")
+    assert web["stage"] == 5 and web["chat_url"] == "http://10.10.120.151:8443"
+    assert web["api_url"] == pods
+    assert "upstream claims_chat { server 10.10.120.151:8443;" in conf
+    assert "upstream claims_api { server 10.10.120.150:8443;" in conf
+
+    web, conf, _ = run(4)
+    assert web["stage"] == 4 and web["api_url"] == pods
+    assert web["chat_url"] == "http://10.10.120.151:8443", "kept for the next --stage 5"
+    assert "upstream claims_chat { server 127.0.0.1:8100;" in conf
+
+    web, conf, _ = run(5)
+    assert "upstream claims_chat { server 10.10.120.151:8443;" in conf, "saved chat URL reused"
+
+    run.nginx_conf.write_text(re.sub(r"upstream claims_chat \{[^}]*\}", "", run.nginx_conf.read_text()))
+    assert "no /chat/ location" in run(5, ok=False)

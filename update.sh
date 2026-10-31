@@ -3,6 +3,7 @@
 #
 #   sudo ./update.sh --stage N
 #   sudo ./update.sh --stage 4 --kubeconfig FILE
+#   sudo LLM_API_KEY=... ./update.sh --stage 5
 #
 # --stage N selects the active path and the architecture diagram.
 # The database address stays as configured. A lower stage stops using a later
@@ -10,6 +11,7 @@
 # The first --stage 3 installs the document VM. Later --stage 3 only selects it.
 # The first --stage 4 deploys the API pods with Helm, using the kubeconfig.
 # Later --stage 4 selects them, and upgrades them when this bundle is newer.
+# The first --stage 5 adds the chat pods to the same release. Later --stage 5 selects them.
 set -euo pipefail
 umask 022
 
@@ -62,15 +64,28 @@ KUBECTL_FALLBACK=v1.35.2
 HELM_VERSION=v3.16.4
 CHART="$BUNDLE/deploy/helm/claims-desk"
 
+# Stage 5: chat pods and the OpenAI-compatible (NAI) endpoint.
+STAGE5_STATE="$KUBE_DIR/stage5"
+CHAT_SECRET=claims-desk-chat
+LLM_BASE_URL="${LLM_BASE_URL:-}"
+LLM_API_KEY="${LLM_API_KEY:-}"
+LLM_MODEL="${LLM_MODEL:-}"
+LLM_VISION_MODEL="${LLM_VISION_MODEL:-}"
+LLM_VERIFY_TLS="${LLM_VERIFY_TLS:-}"
+CHAT_LB_IP="${CHAT_LB_IP:-}"
+CHAT_URL="${CHAT_URL:-}"
+STAGE5_SECRET_HASH=""
+LOCAL_CHAT_UPSTREAM=127.0.0.1:8100
+
 usage() {
-  sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'
   cat <<'EOF'
 
 Options:
   --stage N        1 to 5. Selects the active path and diagram. Does not remove later tiers.
-  --kubeconfig F   stage 4: kubeconfig of the NKP cluster; kept in /root/.claims-desk (0600)
+  --kubeconfig F   stage 4 and 5: kubeconfig of the NKP cluster; kept in /root/.claims-desk (0600)
   --config FILE    settings file (see claims-desk.conf.example)
-  --reconfigure    ask for the database and the document settings again; redeploy the pods
+  --reconfigure    ask for the database, document and LLM settings again; redeploy the pods
   --seed N         sample claims on an empty table (default 12, 0 = none)
   -y, --yes        do not ask for confirmation
   -h, --help       this help
@@ -872,7 +887,8 @@ stage4_values() {
     DB_SSLMODE="$DB_SSLMODE" DB_SCHEMA="$DB_SCHEMA" NFS_SERVER="$NFS_SERVER" NFS_PATH="$NFS_PATH" \
     S3_ENDPOINT="$S3_ENDPOINT" S3_BUCKET="$S3_BUCKET" S3_REGION="$S3_REGION" \
     RUN_UID="$STAGE4_RUN_AS_UID" RUN_GID="$STAGE4_RUN_AS_GID" LB_IP="$STAGE4_LB_IP" \
-    SECRET_HASH="$STAGE4_SECRET_HASH" STAGE="$STAGE" POD_PORT="$POD_PORT" OUT="$out" python3 - <<'PY'
+    SECRET_HASH="$STAGE4_SECRET_HASH" STAGE="$STAGE" POD_PORT="$POD_PORT" OUT="$out" \
+    CHAT_VALUES="$(stage5_chat_values)" python3 - <<'PY'
 import json, os
 e = os.environ
 image = {"tag": e["TAG"]}
@@ -890,6 +906,9 @@ values = {
     "runAsGroup": int(e["RUN_GID"]),
     "service": {"port": int(e["POD_PORT"]), "loadBalancerIP": e["LB_IP"]},
 }
+# Keeps the stage 5 chat pods in the release when the API pods are redeployed.
+if e.get("CHAT_VALUES"):
+    values["chat"] = json.loads(e["CHAT_VALUES"])
 with open(e["OUT"], "w") as fh:
     json.dump(values, fh, indent=2)
 PY
@@ -1014,6 +1033,224 @@ portal_stage4() {
   stage4_check
 }
 
+# ---------------------------------------------------------------- stage 5: chat pods
+
+load_stage5_state() {
+  local base="$LLM_BASE_URL" m="$LLM_MODEL" vm="$LLM_VISION_MODEL" tls="$LLM_VERIFY_TLS" lb="$CHAT_LB_IP"
+  if [ -f "$STAGE5_STATE" ]; then
+    # shellcheck disable=SC1090
+    . "$STAGE5_STATE"
+  fi
+  LLM_BASE_URL="${base:-${LLM_BASE_URL:-}}"
+  LLM_MODEL="${m:-${LLM_MODEL:-gpt-oss-120b}}"
+  LLM_VISION_MODEL="${vm:-${LLM_VISION_MODEL:-gemma-4-26b-a4b}}"
+  LLM_VERIFY_TLS="${tls:-${LLM_VERIFY_TLS:-true}}"
+  CHAT_LB_IP="${lb:-${CHAT_LB_IP:-}}"
+}
+
+save_stage5_state() {
+  install -d -m 700 "$KUBE_DIR"
+  umask 077
+  {
+    printf 'LLM_BASE_URL=%q\n' "$LLM_BASE_URL"
+    printf 'LLM_MODEL=%q\n' "$LLM_MODEL"
+    printf 'LLM_VISION_MODEL=%q\n' "$LLM_VISION_MODEL"
+    printf 'LLM_VERIFY_TLS=%q\n' "$LLM_VERIFY_TLS"
+    printf 'CHAT_LB_IP=%q\n' "$CHAT_LB_IP"
+    printf 'STAGE5_SECRET_HASH=%q\n' "$STAGE5_SECRET_HASH"
+  } > "$STAGE5_STATE"
+  umask 022
+}
+
+# The chart's chat section as JSON, from the saved stage 5 settings. Empty before the first --stage 5.
+stage5_chat_values() {
+  [ -f "$STAGE5_STATE" ] || return 0
+  (
+    load_stage5_state
+    BASE="$LLM_BASE_URL" MODEL="$LLM_MODEL" VMODEL="$LLM_VISION_MODEL" TLS="$LLM_VERIFY_TLS" \
+      LB="$CHAT_LB_IP" HASH="$STAGE5_SECRET_HASH" PORT="$POD_PORT" SECRET_NAME="$CHAT_SECRET" python3 -c '
+import json, os
+e = os.environ
+print(json.dumps({"enabled": True, "existingSecret": e["SECRET_NAME"], "secretHash": e["HASH"],
+                  "llm": {"baseUrl": e["BASE"], "model": e["MODEL"], "visionModel": e["VMODEL"],
+                          "verifyTls": e["TLS"] == "true"},
+                  "service": {"port": int(e["PORT"]), "loadBalancerIP": e["LB"]}}))'
+  )
+}
+
+chat_secret_exists() { kc -n "$K8S_NAMESPACE" get secret "$CHAT_SECRET" >/dev/null 2>&1; }
+
+# The endpoint lists its models. A warning only: the portal may have no route to it, the nodes must.
+stage5_probe_endpoint() {
+  local out="" insecure=()
+  [ "$LLM_VERIFY_TLS" = true ] || insecure=(-k)
+  if ! out="$(curl -sS --max-time 15 "${insecure[@]}" \
+      -H @<(printf 'Authorization: Bearer %s\n' "$LLM_API_KEY") "${LLM_BASE_URL%/}/models" 2>&1)"; then
+    warn "this VM cannot reach ${LLM_BASE_URL}: ${out}. The NKP nodes need HTTPS to it; continuing."
+    return 0
+  fi
+  printf '%s' "$out" | MODEL="$LLM_MODEL" VMODEL="$LLM_VISION_MODEL" python3 -c '
+import json, os, sys
+try:
+    body = json.load(sys.stdin)
+except ValueError:
+    sys.exit("WARNING: the endpoint did not answer /models with JSON")
+if "data" not in body:
+    sys.exit("WARNING: the endpoint refused the key: " + json.dumps(body)[:200])
+served = [m.get("id") for m in body["data"]]
+missing = [m for m in (os.environ["MODEL"], os.environ["VMODEL"]) if m not in served]
+print("   endpoint serves: " + ", ".join(served))
+if missing:
+    sys.exit("WARNING: not served: " + ", ".join(missing))
+' || warn "check the API key and the model names"
+}
+
+# Secret from stdin, never on a command line or in a file.
+stage5_secret() {
+  local manifest
+  manifest="$(K8S_NAMESPACE="$K8S_NAMESPACE" LLM_API_KEY="$LLM_API_KEY" SECRET_NAME="$CHAT_SECRET" python3 - <<'PY'
+import hashlib, json, os
+key = os.environ["LLM_API_KEY"]
+print(hashlib.sha256(key.encode()).hexdigest()[:12])
+print(json.dumps({
+    "apiVersion": "v1", "kind": "Secret", "type": "Opaque",
+    "metadata": {"name": os.environ["SECRET_NAME"], "namespace": os.environ["K8S_NAMESPACE"],
+                 "labels": {"app.kubernetes.io/name": "claims-desk", "app.kubernetes.io/component": "chat"}},
+    "stringData": {"llm-api-key": key},
+}))
+PY
+)"
+  STAGE5_SECRET_HASH="${manifest%%$'\n'*}"
+  printf '%s\n' "${manifest#*$'\n'}" | kc apply -f - >/dev/null || die "could not write Secret ${CHAT_SECRET}"
+  info "Secret ${CHAT_SECRET} (LLM API key only)"
+}
+
+stage5_diagnose() {
+  local sel="app.kubernetes.io/instance=${RELEASE},app.kubernetes.io/component=chat"
+  warn "the chat pods are not healthy. What the cluster says:"
+  kc -n "$K8S_NAMESPACE" get pods -l "$sel" -o wide 2>&1 | sed 's/^/   /' || true
+  kc -n "$K8S_NAMESPACE" logs -l "$sel" --tail=15 --prefix 2>/dev/null | sed 's/^/   /' || true
+}
+
+stage5_check() {
+  local body="" verdict="" ok=0
+  for _ in $(seq 1 30); do
+    if body="$(curl -fsS --max-time 15 "${CHAT_URL}/health" 2>/dev/null)"; then
+      verdict="$(printf '%s' "$body" | python3 -c '
+import json, sys
+b = json.load(sys.stdin)
+problems = []
+if (b.get("api") or {}).get("status") != "ok":
+    problems.append("api: " + str((b.get("api") or {}).get("error") or (b.get("api") or {}).get("status")))
+if (b.get("llm") or {}).get("status") != "ok":
+    problems.append("llm: " + str((b.get("llm") or {}).get("error") or (b.get("llm") or {}).get("status")))
+print("; ".join(problems) or "ok")
+' 2>/dev/null || echo "unreadable reply")"
+      if [ "$verdict" = "ok" ]; then ok=1; break; fi
+    fi
+    sleep 2
+  done
+  if [ "$ok" -ne 1 ]; then
+    [ -n "$body" ] || die "this VM cannot reach ${CHAT_URL}. Open TCP ${POD_PORT} from the portal to the chat load balancer IP."
+    case "$verdict" in
+      *llm:*) warn "the chat pods cannot use ${LLM_BASE_URL}. The nodes (${STAGE4_NODE_IPS:-see kubectl get nodes -o wide}) need HTTPS to it; check the key and the model names." ;;
+    esac
+    stage5_diagnose
+    die "chat pods are not ready: ${verdict}"
+  fi
+  printf '%s' "$body" | python3 -c '
+import json, sys
+b = json.load(sys.stdin)
+r, l = b.get("runtime") or {}, b.get("llm") or {}
+print("   pod   {} on node {} ({})".format(b["host"]["hostname"], r.get("node", "?"), r.get("pod_ip", "?")))
+print("   llm   {}  model {}  vision {}".format(l.get("base_url"), l.get("model"), l.get("vision_model")))
+print("   api   {}".format(b["api"]["url"]))
+'
+}
+
+stage5_wait_lb() {
+  local ip="" svc="${RELEASE}-chat"
+  for _ in $(seq 1 60); do
+    ip="$(kc -n "$K8S_NAMESPACE" get svc "$svc" -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || true)"
+    [ -n "$ip" ] && break
+    sleep 2
+  done
+  [ -n "$ip" ] || die "Service ${svc} has no load balancer IP after 2 minutes. Check MetalLB: kubectl -n ${K8S_NAMESPACE} describe svc ${svc}"
+  CHAT_URL="http://${ip}:${POD_PORT}"
+  info "Service ${svc}: ${CHAT_URL}"
+}
+
+chat_deployed() { kc -n "$K8S_NAMESPACE" get deploy "${RELEASE}-chat" >/dev/null 2>&1; }
+
+portal_stage5() {
+  step "Assistant settings"
+  load_stage5_state
+  local have_secret=0
+  chat_secret_exists && have_secret=1
+  if [ "$INTERACTIVE" -eq 1 ]; then
+    info "The chat pods call an OpenAI-compatible endpoint (NAI): base URL, models, and an API key."
+  fi
+  ask LLM_BASE_URL "OpenAI-compatible base URL, ending in /v1"
+  LLM_BASE_URL="${LLM_BASE_URL%/}"
+  [[ "$LLM_BASE_URL" =~ ^https?://[^[:space:]]+$ ]] || die "LLM base URL must be an http(s) URL"
+  ask LLM_MODEL "Chat model (needs tool calling)" gpt-oss-120b
+  ask LLM_VISION_MODEL "Vision model for photos" gemma-4-26b-a4b
+  [[ "$LLM_MODEL" =~ ^[A-Za-z0-9._:/-]+$ && "$LLM_VISION_MODEL" =~ ^[A-Za-z0-9._:/-]+$ ]] \
+    || die "model names may contain letters, digits and . _ : / - only"
+  case "$LLM_VERIFY_TLS" in true|false) ;; *) die "LLM_VERIFY_TLS must be true or false" ;; esac
+  if [ -z "$LLM_API_KEY" ] && { [ "$RECONFIGURE" -eq 1 ] || [ "$have_secret" -eq 0 ]; }; then
+    ask_secret LLM_API_KEY "API key for ${LLM_BASE_URL}"
+  fi
+  if [ -z "$LLM_API_KEY" ] && [ "$have_secret" -eq 0 ]; then
+    die "the LLM API key is required: set LLM_API_KEY, or run interactively"
+  fi
+  if [ -n "$CHAT_LB_IP" ]; then
+    valid_ipv4 "$CHAT_LB_IP" || die "CHAT_LB_IP must be an IPv4 address"
+  fi
+  echo
+  info "Endpoint     ${LLM_BASE_URL}  TLS verification ${LLM_VERIFY_TLS}"
+  info "Models       ${LLM_MODEL} (chat, tools)  ${LLM_VISION_MODEL} (photos)"
+  info "API key      $([ -n "$LLM_API_KEY" ] && echo "new, into Secret ${CHAT_SECRET}" || echo "kept in Secret ${CHAT_SECRET}")"
+  info "Service      LoadBalancer :${POD_PORT}${CHAT_LB_IP:+  IP ${CHAT_LB_IP}}"
+  if [ -n "$LLM_API_KEY" ]; then
+    stage5_probe_endpoint
+  fi
+  ask_yes "Deploy the chat pods?" Y || die "cancelled"
+
+  step "Deploy the chat pods"
+  if [ -n "$LLM_API_KEY" ]; then
+    stage5_secret
+    LLM_API_KEY=""
+  else
+    STAGE5_SECRET_HASH="${STAGE5_SECRET_HASH:-$(kc -n "$K8S_NAMESPACE" get secret "$CHAT_SECRET" \
+      -o jsonpath='{.metadata.resourceVersion}' 2>/dev/null || true)}"
+  fi
+  save_stage5_state
+  # The release's own values plus the chat section. Not --reuse-values: that would also
+  # keep the old chart's defaults, which have no chat section.
+  local values
+  values="$(mktemp /tmp/claims-desk-chat.XXXXXX.json)"
+  hm get values "$RELEASE" -n "$K8S_NAMESPACE" -o json > "$values" \
+    || die "could not read the values of release ${RELEASE}. Run sudo $0 --stage 4 first"
+  STAGE="$STAGE" CHAT="$(stage5_chat_values)" python3 -c '
+import json, os, sys
+values = json.load(open(sys.argv[1])) or {}
+values["stage"] = int(os.environ["STAGE"])
+values["chat"] = json.loads(os.environ["CHAT"])
+json.dump(values, open(sys.argv[1], "w"))' "$values"
+  info "helm upgrade ${RELEASE} (API pod values kept, chat enabled)"
+  if ! hm upgrade "$RELEASE" "$CHART" -n "$K8S_NAMESPACE" -f "$values" --wait --timeout 10m; then
+    rm -f "$values"
+    stage5_diagnose
+    die "helm could not bring the chat pods up. Fix the cause above, then rerun: sudo $0 --stage 5"
+  fi
+  rm -f "$values"
+  kc -n "$K8S_NAMESPACE" get pods -l "app.kubernetes.io/instance=${RELEASE}" -o wide | sed 's/^/   /'
+  stage5_wait_lb
+  step "Check the chat pods from the portal"
+  stage5_check
+}
+
 docs_configured() {
   [ -f "$ETC/api.json" ] || return 1
   python3 -c 'import json,sys
@@ -1026,6 +1263,29 @@ saved_pod_url() {
   python3 -c 'import json,sys
 d=json.load(open(sys.argv[1]))
 print(d.get("pod_api_url") or "")' "$ETC/web.json"
+}
+
+saved_chat_url() {
+  [ -f "$ETC/web.json" ] || return 0
+  python3 -c 'import json,sys
+d=json.load(open(sys.argv[1]))
+print(d.get("chat_url") or "")' "$ETC/web.json"
+}
+
+# nginx /chat/ goes to the chat pods at stage 5. Below that, to an unused local port.
+set_chat_upstream() {
+  local stage="$1" target="$LOCAL_CHAT_UPSTREAM" conf="$NGINX_CONF"
+  [ -f "$conf" ] || return 0
+  if ! grep -q 'upstream claims_chat' "$conf"; then
+    [ "$stage" -lt 5 ] && return 0
+    die "$conf has no /chat/ location (written by an older install.sh). Run sudo $BUNDLE/install.sh, then this again"
+  fi
+  if [ "$stage" -ge 5 ] && [ -n "$CHAT_URL" ]; then
+    target="${CHAT_URL#*://}"
+    target="${target%%/*}"
+    [[ "$target" == *:* ]] || target="${target}:80"
+  fi
+  sed -i -E "s#^( *upstream claims_chat \\{ server )[^;]+;#\\1${target};#" "$conf"
 }
 
 run_portal_install() {
@@ -1077,11 +1337,18 @@ apply_stage() {
   if [ "$stage" -ge 4 ]; then
     [[ "$POD_API_URL" =~ ^https?://[^[:space:]]+$ ]] || die "API pod URL must be an http(s) URL"
   fi
-  CLAIMS_STAGE="$stage" POD_API_URL="$POD_API_URL" LOCAL_API_URL="$LOCAL_API_URL" ETC="$ETC" python3 - <<'PY'
+  [ -n "$CHAT_URL" ] || CHAT_URL="$(saved_chat_url)"
+  if [ "$stage" -ge 5 ]; then
+    [[ "$CHAT_URL" =~ ^https?://[^[:space:]]+$ ]] \
+      || die "no chat pod URL. Run sudo $0 --stage 5 with the kubeconfig, or set CHAT_URL"
+  fi
+  CLAIMS_STAGE="$stage" POD_API_URL="$POD_API_URL" LOCAL_API_URL="$LOCAL_API_URL" ETC="$ETC" \
+    CHAT_URL="$CHAT_URL" python3 - <<'PY'
 import json, os
 stage = int(os.environ["CLAIMS_STAGE"])
 pod = os.environ.get("POD_API_URL") or ""
 local = os.environ["LOCAL_API_URL"]
+chat = os.environ.get("CHAT_URL") or ""
 
 def merge(path, updates):
     with open(path) as fh:
@@ -1101,10 +1368,14 @@ elif pod:
     web_updates["pod_api_url"] = pod
 else:
     web_updates["api_url"] = local
+# Kept on lower stages too; the web tier shows the assistant only at stage 5.
+if chat:
+    web_updates["chat_url"] = chat
 merge(os.path.join(os.environ["ETC"], "api.json"), {"stage": stage})
 merge(os.path.join(os.environ["ETC"], "web.json"), web_updates)
 PY
   printf '%s\n' "$stage" > "$ETC/stage"
+  set_chat_upstream "$stage"
   set_api_upstream "$stage"
   if [ "$stage" -ge 4 ]; then
     # The pods are the only database client now; the portal middleware stays off.
@@ -1115,6 +1386,9 @@ PY
     systemctl restart claims-api claims-web
   fi
   info "active stage ${stage}. Database address unchanged."
+  if [ "$stage" -ge 5 ]; then
+    info "the assistant on the main page uses /chat/ -> ${CHAT_URL}."
+  fi
   if [ "$stage" -ge 4 ]; then
     info "web tier and /api/ call ${POD_API_URL}. Pods are left as they are."
     info "claims-api on this VM is stopped: the portal no longer connects to PostgreSQL."
@@ -1193,7 +1467,36 @@ case "$STAGE" in
         stage4_wait_lb
       fi
     fi
+    CHAT_DEPLOYED=0
+    if [ "$STAGE" -ge 5 ]; then
+      if have_kubeconfig; then
+        if [ "$RECONFIGURE" -eq 1 ] || [ -n "$LLM_API_KEY" ] || [ ! -f "$STAGE5_STATE" ] || ! chat_deployed; then
+          portal_stage5
+          CHAT_DEPLOYED=1
+        else
+          info "chat pods are deployed in namespace ${K8S_NAMESPACE}. Selecting them (--reconfigure asks for the LLM settings again)."
+          load_stage5_state
+          stage5_wait_lb
+        fi
+      elif [ -z "$CHAT_URL" ] && [ -z "$(saved_chat_url)" ]; then
+        die "the first --stage 5 needs the kubeconfig: sudo $0 --stage 5 --kubeconfig FILE"
+      fi
+    fi
     apply_stage "$STAGE"
+    if [ "$CHAT_DEPLOYED" -eq 1 ]; then
+      name="$(hostname -f 2>/dev/null || hostname)"
+      cat <<EOF
+
+$(printf '\033[1;32m')Claims Desk stage 5: the assistant is running on the chat pods.$(printf '\033[0m')
+
+  Portal        https://${name}/   (Ask the assistant, bottom right)
+  Chat pods     ${CHAT_URL}/health   (namespace ${K8S_NAMESPACE}, release ${RELEASE})
+  Endpoint      ${LLM_BASE_URL}   models ${LLM_MODEL}, ${LLM_VISION_MODEL}
+  API key       Secret ${CHAT_SECRET} in namespace ${K8S_NAMESPACE}; nowhere on this VM
+  Demo data     sudo claims-desk seed-fraud   (suspicious claims, photos, one changed after approval)
+  Back          sudo $0 --stage 4   (hides the assistant; the chat pods keep running)
+EOF
+    fi
     if [ "$DEPLOYED" -eq 1 ]; then
       name="$(hostname -f 2>/dev/null || hostname)"
       cat <<EOF

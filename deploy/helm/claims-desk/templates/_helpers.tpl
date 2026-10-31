@@ -15,6 +15,12 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 app.kubernetes.io/component: api
 {{- end -}}
 
+{{- define "claims-desk.chatSelector" -}}
+app.kubernetes.io/name: claims-desk
+app.kubernetes.io/instance: {{ .Release.Name }}
+app.kubernetes.io/component: chat
+{{- end -}}
+
 {{- define "claims-desk.downward" -}}
 - name: POD_NAMESPACE
   valueFrom: {fieldRef: {fieldPath: metadata.namespace}}
