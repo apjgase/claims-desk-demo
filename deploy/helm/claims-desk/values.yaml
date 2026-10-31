@@ -52,10 +52,12 @@ chat:
   replicas: 2
   existingSecret: claims-desk-chat
   secretHash: ""
+  scopeGuard: true         # refuse questions that are not about claims work
   llm:
     baseUrl: ""
     model: gpt-oss-120b
     visionModel: gemma-4-26b-a4b
+    guardModel: ""         # classifies each question as in or out of scope; empty = visionModel
     verifyTls: true
     timeout: 120
   runAsUser: 10001

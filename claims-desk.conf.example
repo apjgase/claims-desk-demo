@@ -78,4 +78,5 @@ LLM_BASE_URL=''          # ends in /v1, e.g. https://ai.example/enterpriseai/v1
 LLM_MODEL='gpt-oss-120b'         # chat model; must support tool calls
 LLM_VISION_MODEL='gemma-4-26b-a4b'   # photo descriptions; must accept images
 LLM_VERIFY_TLS='true'    # false for an endpoint with a lab CA certificate the image does not trust
+CHAT_SCOPE_GUARD='true'  # false lets the assistant answer off-topic questions
 CHAT_LB_IP=''            # empty = MetalLB picks an address from its pool

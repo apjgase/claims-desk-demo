@@ -1,4 +1,4 @@
 """Claims Desk demo application: web tier, middleware API, and database helpers."""
 
-__version__ = "0.4.1"
+__version__ = "0.4.2"
 STAGE = "Stage 1 - Portal VM"

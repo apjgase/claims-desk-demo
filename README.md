@@ -77,7 +77,7 @@ In a Flow policy for `AppTier: Web`, the outbound rule to the database is the on
 
 In Prism Central: **Create VM → Guest Customization → Cloud-init (Linux) → Custom Script**, and paste the file after editing the lines marked `EDIT` (host name, FQDN, `lab01` address). The lab SSH key is already in it. The VM needs dnf repository access during first boot. It is ready when `/var/lib/claims-desk/vm-ready` exists; first-boot output is in `/var/log/cloud-init-output.log`. With the packages already present, `install.sh` skips dnf, reports SELinux and firewalld as disabled, and needs no repository access.
 
-At first boot it also downloads the offline bundle from the latest GitHub release, checks it against the published `.sha256`, and extracts it to `/opt/claims-desk-bundle`. Set `BUNDLE_TAG` in the file to pin a release (for example `v0.4.1`). Without internet, set `BUNDLE_URL` to an internal copy with its `.sha256` next to it (or set `BUNDLE_SHA256`), or to `""` to copy the bundle with `scp`. If the download or the checksum fails, `vm-ready` is not written, `cloud-init status` reports an error, and `/var/lib/claims-desk/bundle-failed` says why; fix the cause and run `sudo claims-desk-fetch-bundle`.
+At first boot it also downloads the offline bundle from the latest GitHub release, checks it against the published `.sha256`, and extracts it to `/opt/claims-desk-bundle`. Set `BUNDLE_TAG` in the file to pin a release (for example `v0.4.2`). Without internet, set `BUNDLE_URL` to an internal copy with its `.sha256` next to it (or set `BUNDLE_SHA256`), or to `""` to copy the bundle with `scp`. If the download or the checksum fails, `vm-ready` is not written, `cloud-init status` reports an error, and `/var/lib/claims-desk/bundle-failed` says why; fix the cause and run `sudo claims-desk-fetch-bundle`.
 
 ### Lab SSH key
 
@@ -96,13 +96,13 @@ On another admin machine, copy the private key to `~/.ssh/claims-desk-lab` (mode
 
 With the portal cloud-init, the VM has already downloaded, verified, and extracted the latest release to `/opt/claims-desk-bundle/claims-desk-demo-<version>` (re-run with `sudo claims-desk-fetch-bundle`). Otherwise, on the VM:
 
-**Offline bundle (recommended).** Includes the Python wheels for Rocky 9, so the VM needs only its dnf repositories. The asset is attached when `v0.4.1` is tagged; until then copy this directory to the VM.
+**Offline bundle (recommended).** Includes the Python wheels for Rocky 9, so the VM needs only its dnf repositories. The asset is attached when `v0.4.2` is tagged; until then copy this directory to the VM.
 
 ```bash
-REL=https://github.com/apjgase/claims-desk-demo/releases/download/v0.4.1
-curl -fLO $REL/claims-desk-demo-0.4.1.tar.gz -fLO $REL/claims-desk-demo-0.4.1.tar.gz.sha256
-sha256sum -c claims-desk-demo-0.4.1.tar.gz.sha256
-tar -xzf claims-desk-demo-0.4.1.tar.gz && cd claims-desk-demo-0.4.1
+REL=https://github.com/apjgase/claims-desk-demo/releases/download/v0.4.2
+curl -fLO $REL/claims-desk-demo-0.4.2.tar.gz -fLO $REL/claims-desk-demo-0.4.2.tar.gz.sha256
+sha256sum -c claims-desk-demo-0.4.2.tar.gz.sha256
+tar -xzf claims-desk-demo-0.4.2.tar.gz && cd claims-desk-demo-0.4.2
 ```
 
 Without internet on the VM, download it elsewhere (GitHub, **Releases**) and copy it with `scp`.
@@ -309,6 +309,8 @@ The main page gets an **Ask the assistant** panel. It answers questions about th
                        NAI / OpenAI-compatible endpoint ◀──HTTPS 443── model calls ────────────────────────────┘
 ```
 
+**Scope.** The assistant answers only Claims Desk questions: claims, claimants and policies, fraud review, photos and packets, drafts for a claim, claims handling in general, and how the assistant works. Before the chat model sees a question, the guard model (the vision model unless `chat.llm.guardModel` is set, about 0.2 s) classifies it with the last few turns as context. Off-topic requests, such as songs, poems or jokes (even about insurance), general knowledge, programming, or attempts to change the rules, get a fixed reply without a model answer or a tool call. The system prompt carries the same rule, so if the guard model does not answer, the question goes through and the chat model still declines. `sudo CHAT_SCOPE_GUARD=false ./update.sh --stage 5` turns the guard off for a before-and-after demo; it is saved for later runs.
+
 The chat pods hold no database or Objects credentials and mount no share. They reach claims, photos and packets only through the API Service, so the stage 4 Flow policy stays as it is. Their one secret is the endpoint API key.
 
 | Ask | What happens |
@@ -376,6 +378,7 @@ curl -sk https://<portal>/chat/health                 # models, API, tools
 | **Assistant unavailable** in the panel | `curl -sk https://<portal>/chat/health`. `llm` unavailable: the nodes cannot reach the endpoint on 443, or the key is wrong. `model missing`: a model name the endpoint does not serve. `api` unavailable: the API pods are down |
 | The assistant answers without looking anything up | The chat model does not support tool calls. Use one that does (`gpt-oss-120b`), `--stage 5 --reconfigure` |
 | Photo descriptions are empty | The vision model does not accept images. Set `LLM_VISION_MODEL` to one that does |
+| The assistant refuses a claims question | The guard model classified it as off-topic. Rephrase it around a claim, or check `scope_guard` in `/chat/health`; `CHAT_SCOPE_GUARD=false` turns the check off |
 | Photo upload fails with permission denied at stage 4 | The pods' uid cannot write on the share. Rerun with `STAGE4_RUN_AS_UID` set to the uid that owns the files, `--reconfigure`. |
 
 ## Development
