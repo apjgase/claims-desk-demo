@@ -91,38 +91,58 @@ def _tamper(cfg, claim_number: str) -> str:
                                                                      cfg["db_schema"], claim_number)
 
 
+def _existing(api: httpx.Client, claim: dict):
+    """The demo claim already in the database: same policy, claimant and description."""
+    rows = _check(api.get("/api/v1/claims", params={"q": claim["claimant_name"], "limit": 100}), "search")
+    for row in rows:
+        if (row["policy_number"], row["claimant_name"], row["description"]) == \
+                (claim["policy_number"], claim["claimant_name"], claim["description"]):
+            return row
+    return None
+
+
+def _upload(api: httpx.Client, number: str, photo: str) -> None:
+    blob = (SAMPLES / photo).read_bytes()
+    _check(api.post("/api/v1/claims/{}/photo".format(number),
+                    files={"photo": (photo, blob, "image/jpeg")}), "photo upload")
+
+
 def main() -> None:
+    """Adds the demo claims that are missing. Safe to run on every --stage 5: existing ones are kept
+    as they are (a missing photo is added once the document tier is active), never duplicated."""
     cfg = config.load()
     with httpx.Client(base_url=cfg["api_url"], timeout=60) as api:
-        found = _check(api.get("/api/v1/claims", params={"q": MARKER}), "search")
-        if found:
-            print("seed-fraud: claims on {} already exist ({}); skipped".format(
-                MARKER, ", ".join(c["claim_number"] for c in found)))
-            return
         documents = bool((_check(api.get("/api/v1/info"), "info").get("documents") or {}).get("enabled"))
         if not documents:
             print("seed-fraud: the document tier is not active, so no photos and no packet")
-        made = []
+        lines, added = [], 0
         for label, claim, photo in _claims(date.today()):
-            row = _check(api.post("/api/v1/claims", json=claim), "create claim")
-            number = row["claim_number"]
-            note = ""
+            row = _existing(api, claim)
+            if row is not None:
+                number, note = row["claim_number"], "already there"
+                if photo and documents and not row.get("photo_path"):
+                    _upload(api, number, photo)
+                    note += "; photo " + photo + " added"
+                lines.append((number, label, note))
+                continue
+            number = _check(api.post("/api/v1/claims", json=claim), "create claim")["claim_number"]
+            added += 1
+            note = "added"
             if photo and documents:
-                blob = (SAMPLES / photo).read_bytes()
-                _check(api.post("/api/v1/claims/{}/photo".format(number),
-                                files={"photo": (photo, blob, "image/jpeg")}), "photo upload")
-                note = "photo " + photo
+                _upload(api, number, photo)
+                note += ", photo " + photo
             if label == "tamper":
                 _check(api.patch("/api/v1/claims/" + number, json={"status": "APPROVED"}), "approve")
-                note = "approved, packet written to Objects" if documents else "approved"
+                note += ", approved"
                 if documents:
-                    note += "; " + _tamper(cfg, number)
+                    note += ", packet written to Objects; " + _tamper(cfg, number)
             elif label in ("ring", "old photo"):
                 _check(api.patch("/api/v1/claims/" + number, json={"status": "IN_REVIEW"}), "status")
-            made.append((number, label, note))
-    for number, label, note in made:
+            lines.append((number, label, note))
+    for number, label, note in lines:
         print("  {}  {:<9}  {}".format(number, label, note))
-    print("seed-fraud: {} claims added. Ask the assistant: Which open claims look suspicious?".format(len(made)))
+    print("seed-fraud: {} added, {} already there. Ask the assistant: Which open claims look suspicious?".format(
+        added, len(lines) - added))
 
 
 if __name__ == "__main__":

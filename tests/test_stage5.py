@@ -228,6 +228,80 @@ def test_bundled_samples():
                for i, a in enumerate(hashes) for b in hashes[i + 1:]), "only reuse makes samples match"
 
 
+class FakeAPI:
+    """The middleware as seed-fraud sees it: claims in memory, photos, status changes."""
+
+    def __init__(self, documents=True):
+        self.documents, self.rows, self.photos = documents, [], 0
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        path, method = request.url.path, request.method
+        if path == "/api/v1/info":
+            return httpx.Response(200, json={"documents": {"enabled": self.documents}})
+        if path == "/api/v1/claims" and method == "GET":
+            q = request.url.params.get("q", "").lower()
+            return httpx.Response(200, json=[r for r in self.rows if q in r["claimant_name"].lower()])
+        if path == "/api/v1/claims" and method == "POST":
+            row = dict(json.loads(request.content), status="SUBMITTED", photo_path=None,
+                       claim_number="CLM-{:06d}".format(len(self.rows) + 1))
+            self.rows.append(row)
+            return httpx.Response(201, json=row)
+        number = path.split("/")[4]
+        row = next(r for r in self.rows if r["claim_number"] == number)
+        if path.endswith("/photo"):
+            assert self.documents
+            self.photos += 1
+            row["photo_path"] = "/mnt/{}/photo.jpg".format(number)
+        else:
+            row["status"] = json.loads(request.content)["status"]
+        return httpx.Response(200, json=row)
+
+
+@pytest.fixture
+def seed_with(monkeypatch, capsys):
+    from claimsdesk import seedfraud
+    tampered = []
+    monkeypatch.setattr(seedfraud, "_tamper", lambda _cfg, number: tampered.append(number) or "changed")
+    monkeypatch.setitem(seedfraud.config.DEFAULTS, "api_url", "http://api.test")
+
+    def run(fake):
+        real = httpx.Client
+        monkeypatch.setattr(seedfraud.httpx, "Client",
+                            lambda **kw: real(transport=httpx.MockTransport(fake), **kw))
+        seedfraud.main()
+        monkeypatch.setattr(seedfraud.httpx, "Client", real)
+        return capsys.readouterr().out
+
+    run.tampered = tampered
+    return run
+
+
+def test_seed_fraud_adds_only_missing_claims(seed_with):
+    fake = FakeAPI()
+    first = seed_with(fake)
+    assert "7 added, 0 already there" in first
+    assert len(fake.rows) == 7 and fake.photos == 5 and len(seed_with.tampered) == 1
+    statuses = {r["claimant_name"]: r["status"] for r in fake.rows}
+    assert statuses["Henry Walker"] == "APPROVED" and statuses["Priya Raman"] == "IN_REVIEW"
+
+    fake.rows.pop(3)
+    second = seed_with(fake)
+    assert "1 added, 6 already there" in second, "a deleted demo claim comes back; the rest are kept"
+    assert len(fake.rows) == 7 and fake.photos == 6
+    assert len(seed_with.tampered) == 1, "the approved claim is changed once, when it is created"
+    assert "0 added, 7 already there" in seed_with(fake)
+
+
+def test_seed_fraud_adds_photos_once_documents_are_active(seed_with):
+    fake = FakeAPI(documents=False)
+    assert "no photos" in seed_with(fake)
+    assert fake.photos == 0 and seed_with.tampered == []
+    fake.documents = True
+    out = seed_with(fake)
+    assert "0 added" in out and fake.photos == 5 and out.count("photo") >= 5
+    assert len(fake.rows) == 7
+
+
 # ---------------------------------------------------------------- document service
 
 @pytest.fixture
@@ -596,5 +670,6 @@ def web_page(monkeypatch):
 def test_chat_panel_only_at_stage_5(web_page):
     page = web_page(5, "http://10.10.120.151:8443")
     assert 'id="chat"' in page and "/static/chat.js" in page and "<b>CHAT</b>" in page
+    assert "Written by" not in page, "the claims table has no host column"
     assert 'id="chat"' not in web_page(4, "http://10.10.120.151:8443"), "kept but hidden below stage 5"
     assert 'id="chat"' not in web_page(5, "")

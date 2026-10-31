@@ -25,7 +25,7 @@
 <table class="claims">
   <thead>
     <tr><th>Claim</th><th>Claimant</th><th>Policy</th><th>Type</th><th class="r">Amount</th>
-        <th>Status</th><th>Submitted</th><th>Written by</th></tr>
+        <th>Status</th><th>Submitted</th></tr>
   </thead>
   <tbody>
   {% for c in claims %}
@@ -37,10 +37,9 @@
       <td class="r mono">{{ c.amount|money }}</td>
       <td><span class="status s-{{ c.status|lower }}">{{ c.status|replace('_', ' ') }}</span></td>
       <td class="mono">{{ c.created_at|when }}</td>
-      <td class="mono dim">{{ c.created_by_host }}</td>
     </tr>
   {% else %}
-    <tr><td colspan="8" class="empty">
+    <tr><td colspan="7" class="empty">
       {% if error %}No data: the request did not reach the database.{% else %}No claims yet. <a href="/claims/new">Submit the first one.</a>{% endif %}
     </td></tr>
   {% endfor %}
