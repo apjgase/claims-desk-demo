@@ -77,7 +77,7 @@ In a Flow policy for `AppTier: Web`, the outbound rule to the database is the on
 
 In Prism Central: **Create VM → Guest Customization → Cloud-init (Linux) → Custom Script**, and paste the file after editing the lines marked `EDIT` (host name, FQDN, `lab01` address). The lab SSH key is already in it. The VM needs dnf repository access during first boot. It is ready when `/var/lib/claims-desk/vm-ready` exists; first-boot output is in `/var/log/cloud-init-output.log`. With the packages already present, `install.sh` skips dnf, reports SELinux and firewalld as disabled, and needs no repository access.
 
-At first boot it also downloads the offline bundle from the latest GitHub release, checks it against the published `.sha256`, and extracts it to `/opt/claims-desk-bundle`. Set `BUNDLE_TAG` in the file to pin a release (for example `v0.4.2`). Without internet, set `BUNDLE_URL` to an internal copy with its `.sha256` next to it (or set `BUNDLE_SHA256`), or to `""` to copy the bundle with `scp`. If the download or the checksum fails, `vm-ready` is not written, `cloud-init status` reports an error, and `/var/lib/claims-desk/bundle-failed` says why; fix the cause and run `sudo claims-desk-fetch-bundle`.
+At first boot it also downloads the offline bundle from the latest GitHub release, checks it against the published `.sha256`, and extracts it to `/opt/claims-desk-bundle`. Set `BUNDLE_TAG` in the file to pin a release (for example `v0.4.3`). Without internet, set `BUNDLE_URL` to an internal copy with its `.sha256` next to it (or set `BUNDLE_SHA256`), or to `""` to copy the bundle with `scp`. If the download or the checksum fails, `vm-ready` is not written, `cloud-init status` reports an error, and `/var/lib/claims-desk/bundle-failed` says why; fix the cause and run `sudo claims-desk-fetch-bundle`.
 
 ### Lab SSH key
 
@@ -96,13 +96,13 @@ On another admin machine, copy the private key to `~/.ssh/claims-desk-lab` (mode
 
 With the portal cloud-init, the VM has already downloaded, verified, and extracted the latest release to `/opt/claims-desk-bundle/claims-desk-demo-<version>` (re-run with `sudo claims-desk-fetch-bundle`). Otherwise, on the VM:
 
-**Offline bundle (recommended).** Includes the Python wheels for Rocky 9, so the VM needs only its dnf repositories. The asset is attached when `v0.4.2` is tagged; until then copy this directory to the VM.
+**Offline bundle (recommended).** Includes the Python wheels for Rocky 9, so the VM needs only its dnf repositories. The asset is attached when `v0.4.3` is tagged; until then copy this directory to the VM.
 
 ```bash
-REL=https://github.com/apjgase/claims-desk-demo/releases/download/v0.4.2
-curl -fLO $REL/claims-desk-demo-0.4.2.tar.gz -fLO $REL/claims-desk-demo-0.4.2.tar.gz.sha256
-sha256sum -c claims-desk-demo-0.4.2.tar.gz.sha256
-tar -xzf claims-desk-demo-0.4.2.tar.gz && cd claims-desk-demo-0.4.2
+REL=https://github.com/apjgase/claims-desk-demo/releases/download/v0.4.3
+curl -fLO $REL/claims-desk-demo-0.4.3.tar.gz -fLO $REL/claims-desk-demo-0.4.3.tar.gz.sha256
+sha256sum -c claims-desk-demo-0.4.3.tar.gz.sha256
+tar -xzf claims-desk-demo-0.4.3.tar.gz && cd claims-desk-demo-0.4.3
 ```
 
 Without internet on the VM, download it elsewhere (GitHub, **Releases**) and copy it with `scp`.
@@ -173,7 +173,7 @@ sudo claims-desk logs 200   # nginx, claims-web, claims-api
 **Select a stage:** `sudo ./update.sh --stage N` (1 through 5). This sets the active path and the architecture diagram. It does not change the database address. Dropping to a lower stage stops using a later tier and leaves that tier in place: the document VM, its keys, and any pods stay. Stage 4 and 5 point the web tier and `/api/` at the API pods and stop `claims-api` on the portal; stage 3 and lower start it again. The first `--stage 4` deploys the pods (see [Stage 4](#stage-4-api-pods-on-nkp)).
 **Upgrade the portal code:** run the same command again for the stage you want active. `sudo ./install.sh` upgrades the portal and then the next `./update.sh --stage N` selects the diagram.
 **Point at another database:** `sudo ./update.sh --stage 1 --reconfigure`.
-**Add Files and Objects:** `sudo ./update.sh --stage 3` the first time. Running it again selects stage 3 and leaves the document VM as it is. `--reconfigure` installs it again.
+**Add Files and Objects:** `sudo ./update.sh --stage 3` the first time. Running it again selects stage 3 and leaves the document VM as it is, unless it runs another version than the bundle; then it is upgraded with the saved settings. `--reconfigure` installs it again.
 **Add the API pods:** `sudo ./update.sh --stage 4 --kubeconfig FILE` the first time. Running `--stage 4` again selects the pods, and upgrades them when the bundle is newer than the running image. `--reconfigure` deploys them again.
 **Add the assistant:** `sudo ./update.sh --stage 5` after stage 4 (see [Stage 5](#stage-5-claims-assistant)). `--stage 4` hides it again; the chat pods keep running.
 **Remove the portal:** `sudo ./uninstall.sh`. The database is left alone. The document VM is left alone too; its `claims-docs` service keeps running. The API pods keep running; the script prints the `helm uninstall` command.
@@ -281,7 +281,7 @@ Unattended: add the stage 4 lines from [`claims-desk.conf.example`](claims-desk.
 | Command | Result |
 | :--- | :--- |
 | `sudo ./update.sh --stage 4` | Selects the pods. Upgrades them first when the running image is older than this bundle. Works with the Flow drop in place: the portal skips its database check |
-| `sudo ./update.sh --stage 3` | The portal middleware and the document VM take over again. The pods keep running. The portal must reach PostgreSQL again (remove the Flow drop first). Installs the document VM when stage 3 was never run |
+| `sudo ./update.sh --stage 3` | The portal middleware and the document VM take over again. The pods keep running. The portal must reach PostgreSQL again (remove the Flow drop first). Installs the document VM when stage 3 was never run, and upgrades it when its version differs from the bundle |
 | `sudo ./update.sh --stage 1` or `--stage 2` | The portal middleware takes over again, without documents. The pods and the document VM keep running. Remove the Flow drop first: the portal checks PostgreSQL before it switches |
 | `sudo ./update.sh --stage 5` | Same API pods, plus the chat pods and the assistant on the main page (see [Stage 5](#stage-5-claims-assistant)) |
 | `sudo ./update.sh --stage 4 --reconfigure` | Asks again and redeploys: a new export, new keys, a new uid. Also asks for the database settings and checks them from the portal, so remove the Flow drop first |

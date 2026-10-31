@@ -126,7 +126,7 @@ write_files:
       #!/bin/bash
       set -euo pipefail
       REPO=apjgase/claims-desk-demo
-      BUNDLE_TAG="${BUNDLE_TAG:-latest}"        # EDIT (optional): a release tag, e.g. v0.4.2
+      BUNDLE_TAG="${BUNDLE_TAG:-latest}"        # EDIT (optional): a release tag, e.g. v0.4.3
       BUNDLE_URL="${BUNDLE_URL-github}"         # EDIT (optional): internal copy, or "" for scp
       BUNDLE_SHA256="${BUNDLE_SHA256:-}"        # EDIT (optional): when no <url>.sha256 is published
       state=/var/lib/claims-desk
