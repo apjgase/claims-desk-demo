@@ -46,4 +46,32 @@
   {% endfor %}
   </tbody>
 </table>
+
+{% if chat_enabled %}
+<button type="button" class="chat-toggle" id="chat-toggle">Ask the assistant</button>
+<aside class="chat" id="chat" aria-label="Claims assistant">
+  <div class="chat-head">
+    <b>Claims assistant</b>
+    <span class="model" id="chat-model">read-only</span>
+    <button type="button" id="chat-clear" title="New conversation">New</button>
+    <button type="button" id="chat-close" title="Close">✕</button>
+  </div>
+  <div class="chat-log" id="chat-log">
+    <p class="chat-note">Reads claims from PostgreSQL, photos from Files, and approval packets from Objects.
+      Fraud scores come from fixed rules; the assistant explains them. It cannot change a claim.</p>
+    <div class="chat-starters" id="chat-starters">
+      <button type="button">Which open claims look suspicious?</button>
+      <button type="button">Has anything changed on approved claims since their packet was written to Objects?</button>
+      <button type="button">Summarise the portfolio by loss type and status.</button>
+      <button type="button">Do the photos on the riskiest claims match their descriptions?</button>
+    </div>
+  </div>
+  <form class="chat-form" id="chat-form">
+    <textarea id="chat-input" placeholder="Ask about claims, photos, packets, or fraud risk" required></textarea>
+    <button type="submit" id="chat-send">Send</button>
+  </form>
+</aside>
+{% endif %}
 {% endblock %}
+
+{% block scripts %}{% if chat_enabled %}<script src="/static/chat.js" defer></script>{% endif %}{% endblock %}

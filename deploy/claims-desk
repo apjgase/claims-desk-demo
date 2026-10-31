@@ -18,6 +18,7 @@ Usage: claims-desk <command>
   check          log in to PostgreSQL as the app user; show which node answered
   info           database server details and claim counts (JSON)
   seed [N]       add N sample claims (default 12)
+  seed-fraud     add a few suspicious claims with photos for the stage 5 assistant (through the API)
   reset          delete every claim and restart numbering (asks first)
   restart        restart the portal services that the active stage uses
   logs [N]       last N log lines of the portal services, and of the API pods at stage 4
@@ -69,6 +70,20 @@ case "${1:-}" in
         echo "no API pod URL saved"
       fi
       echo
+      if [ "$STAGE" -ge 5 ]; then
+        chat_url="$(web_key chat_url)"
+        printf '%-12s ' "chat pods"
+        if [ -n "$chat_url" ]; then
+          curl -fsS --max-time 15 "${chat_url%/}/health" | python3 -c '
+import json, sys
+b = json.load(sys.stdin)
+l = b.get("llm") or {}
+print("{} llm {} ({}, {}) api {}".format(b.get("status"), l.get("status"), l.get("model"),
+      l.get("vision_model"), (b.get("api") or {}).get("status")))' || echo "no response from ${chat_url}"
+        else
+          echo "no chat URL saved"
+        fi
+      fi
       if pods_available; then
         kc get pods -l app.kubernetes.io/instance=claims-desk -o wide || true
       fi
@@ -84,6 +99,10 @@ case "${1:-}" in
   check) admin check ;;
   info) admin info ;;
   seed) admin seed "${2:-12}" ;;
+  seed-fraud)
+    CLAIMS_CONFIG=/etc/claims-desk/api.json CLAIMS_API_URL="$(web_key api_url)" PYTHONPATH="$PREFIX/app" \
+      "$PREFIX/venv/bin/python" -m claimsdesk.seedfraud
+    ;;
   reset)
     read -r -p "Delete ALL claims? Type yes: " answer
     if [ "$answer" = "yes" ]; then admin reset; else echo "cancelled"; fi

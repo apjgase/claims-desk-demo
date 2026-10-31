@@ -8,7 +8,7 @@ The working application behind the Claims Desk architecture deck. An adjuster su
 | 2 | 5 | Same app on NDB PostgreSQL HA: point it at HAProxy port 5000 | Configuration only |
 | **3** | **6** | **Document VM writes the photo to Nutanix Files (NFSv3) and the accepted packet to Objects.** | **In this tree** |
 | **4** | **7** | **API pods on NKP take the middleware and document role; portal to database becomes a Flow drop** | **In this tree** |
-| 5 | 8 | Chat pods and a NAI endpoint on the same NKP cluster | Planned |
+| **5** | **8** | **Chat pods on NKP: a read-only claims assistant with fraud checks, on a NAI (OpenAI-compatible) endpoint** | **In this tree** |
 | 6 | 10 | UAT copy by NCM Self-Service from a masked NDB clone | Planned |
 
 Design, API, data model and a demo run sheet: [`docs/STAGE1.md`](docs/STAGE1.md).
@@ -77,7 +77,7 @@ In a Flow policy for `AppTier: Web`, the outbound rule to the database is the on
 
 In Prism Central: **Create VM → Guest Customization → Cloud-init (Linux) → Custom Script**, and paste the file after editing the lines marked `EDIT` (host name, FQDN, `lab01` address). The lab SSH key is already in it. The VM needs dnf repository access during first boot. It is ready when `/var/lib/claims-desk/vm-ready` exists; first-boot output is in `/var/log/cloud-init-output.log`. With the packages already present, `install.sh` skips dnf, reports SELinux and firewalld as disabled, and needs no repository access.
 
-At first boot it also downloads the offline bundle from the latest GitHub release, checks it against the published `.sha256`, and extracts it to `/opt/claims-desk-bundle`. Set `BUNDLE_TAG` in the file to pin a release (for example `v0.3.1`). Without internet, set `BUNDLE_URL` to an internal copy with its `.sha256` next to it (or set `BUNDLE_SHA256`), or to `""` to copy the bundle with `scp`. If the download or the checksum fails, `vm-ready` is not written, `cloud-init status` reports an error, and `/var/lib/claims-desk/bundle-failed` says why; fix the cause and run `sudo claims-desk-fetch-bundle`.
+At first boot it also downloads the offline bundle from the latest GitHub release, checks it against the published `.sha256`, and extracts it to `/opt/claims-desk-bundle`. Set `BUNDLE_TAG` in the file to pin a release (for example `v0.4.0`). Without internet, set `BUNDLE_URL` to an internal copy with its `.sha256` next to it (or set `BUNDLE_SHA256`), or to `""` to copy the bundle with `scp`. If the download or the checksum fails, `vm-ready` is not written, `cloud-init status` reports an error, and `/var/lib/claims-desk/bundle-failed` says why; fix the cause and run `sudo claims-desk-fetch-bundle`.
 
 ### Lab SSH key
 
@@ -96,13 +96,13 @@ On another admin machine, copy the private key to `~/.ssh/claims-desk-lab` (mode
 
 With the portal cloud-init, the VM has already downloaded, verified, and extracted the latest release to `/opt/claims-desk-bundle/claims-desk-demo-<version>` (re-run with `sudo claims-desk-fetch-bundle`). Otherwise, on the VM:
 
-**Offline bundle (recommended).** Includes the Python wheels for Rocky 9, so the VM needs only its dnf repositories. The asset is attached when `v0.3.1` is tagged; until then copy this directory to the VM.
+**Offline bundle (recommended).** Includes the Python wheels for Rocky 9, so the VM needs only its dnf repositories. The asset is attached when `v0.4.0` is tagged; until then copy this directory to the VM.
 
 ```bash
-REL=https://github.com/apjgase/claims-desk-demo/releases/download/v0.3.1
-curl -fLO $REL/claims-desk-demo-0.3.1.tar.gz -fLO $REL/claims-desk-demo-0.3.1.tar.gz.sha256
-sha256sum -c claims-desk-demo-0.3.1.tar.gz.sha256
-tar -xzf claims-desk-demo-0.3.1.tar.gz && cd claims-desk-demo-0.3.1
+REL=https://github.com/apjgase/claims-desk-demo/releases/download/v0.4.0
+curl -fLO $REL/claims-desk-demo-0.4.0.tar.gz -fLO $REL/claims-desk-demo-0.4.0.tar.gz.sha256
+sha256sum -c claims-desk-demo-0.4.0.tar.gz.sha256
+tar -xzf claims-desk-demo-0.4.0.tar.gz && cd claims-desk-demo-0.4.0
 ```
 
 Without internet on the VM, download it elsewhere (GitHub, **Releases**) and copy it with `scp`.
@@ -156,6 +156,7 @@ sudo claims-desk status     # services and end-to-end health
 sudo claims-desk check      # log in to PostgreSQL as the app user; primary or replica
 sudo claims-desk info       # server details and claim counts (JSON)
 sudo claims-desk seed 20    # add sample claims
+sudo claims-desk seed-fraud # stage 5 demo: suspicious claims with photos (once)
 sudo claims-desk reset      # delete every claim (asks first)
 sudo claims-desk logs 200   # nginx, claims-web, claims-api
 ```
@@ -174,6 +175,7 @@ sudo claims-desk logs 200   # nginx, claims-web, claims-api
 **Point at another database:** `sudo ./update.sh --stage 1 --reconfigure`.
 **Add Files and Objects:** `sudo ./update.sh --stage 3` the first time. Running it again selects stage 3 and leaves the document VM as it is. `--reconfigure` installs it again.
 **Add the API pods:** `sudo ./update.sh --stage 4 --kubeconfig FILE` the first time. Running `--stage 4` again selects the pods, and upgrades them when the bundle is newer than the running image. `--reconfigure` deploys them again.
+**Add the assistant:** `sudo ./update.sh --stage 5` after stage 4 (see [Stage 5](#stage-5-claims-assistant)). `--stage 4` hides it again; the chat pods keep running.
 **Remove the portal:** `sudo ./uninstall.sh`. The database is left alone. The document VM is left alone too; its `claims-docs` service keeps running. The API pods keep running; the script prints the `helm uninstall` command.
 
 ## Stage 3: document VM, Files, Objects
@@ -211,7 +213,7 @@ The architecture page (`/about`) keeps the stage 1 row on every stage that is dr
 
 Stage 3 adds a branch from the middleware down to the document VM (`:8090`). Files (NFSv3 2049) and Objects (S3 443) both hang off the document VM. PostgreSQL keeps the stage 1 label and the live endpoint.
 
-Stages 4 and 5 follow the same pattern. Keep that row, and show only the tier that changed: stage 4 turns the middleware box into the API pods and hangs Files and Objects off those pods; stage 5 adds chat pods and NAI as a further branch, marked *not deployed* until stage 5 code exists. Do not draw a new row that drops the browser and the web tier.
+Stages 4 and 5 follow the same pattern. Keep that row, and show only the tier that changed: stage 4 turns the middleware box into the API pods and hangs Files and Objects off those pods; stage 5 adds the chat pods and the NAI endpoint as a further branch off the API pods. Do not draw a new row that drops the browser and the web tier.
 
 ```bash
 curl -sS http://<document-vm>:8090/health
@@ -281,7 +283,7 @@ Unattended: add the stage 4 lines from [`claims-desk.conf.example`](claims-desk.
 | `sudo ./update.sh --stage 4` | Selects the pods. Upgrades them first when the running image is older than this bundle. Works with the Flow drop in place: the portal skips its database check |
 | `sudo ./update.sh --stage 3` | The portal middleware and the document VM take over again. The pods keep running. The portal must reach PostgreSQL again (remove the Flow drop first). Installs the document VM when stage 3 was never run |
 | `sudo ./update.sh --stage 1` or `--stage 2` | The portal middleware takes over again, without documents. The pods and the document VM keep running. Remove the Flow drop first: the portal checks PostgreSQL before it switches |
-| `sudo ./update.sh --stage 5` | Same pods as stage 4; the diagram adds the planned chat branch. The pods still report stage 4 in `/api/v1/info` |
+| `sudo ./update.sh --stage 5` | Same API pods, plus the chat pods and the assistant on the main page (see [Stage 5](#stage-5-claims-assistant)) |
 | `sudo ./update.sh --stage 4 --reconfigure` | Asks again and redeploys: a new export, new keys, a new uid. Also asks for the database settings and checks them from the portal, so remove the Flow drop first |
 
 Any stage can follow any other: going up to 4 or 5 deploys or selects the pods, going down to 1, 2 or 3 points nginx back at the portal middleware. Nothing is removed. Going from stage 1 or 2 straight to 4 works too; with no stage 3 settings to reuse, it asks for the Files export, the Objects keys and the pod uid.
@@ -293,6 +295,57 @@ The same pages. New claims show a pod name in *Written by*. `/about` shows the A
 ```bash
 sudo claims-desk status     # portal services, the pod health, kubectl get pods
 sudo claims-desk logs 100   # portal services and both containers of every pod
+```
+
+## Stage 5: claims assistant
+
+The main page gets an **Ask the assistant** panel. It answers questions about the claims, and ranks them by fraud risk, from the data the earlier stages built: rows in PostgreSQL, photos on Files, and the approval packets on Objects. It is read-only: every tool it has is a GET, so it cannot change a claim, a file or an object.
+
+```
+ Adjuster ──443──▶ Portal VM: nginx /chat/ ──HTTP 8443──▶ Service claims-desk-chat (LoadBalancer) ──▶ chat pods :8100
+                                                                                                        │      │
+                       API pods (claims-desk-api Service, in-cluster) ◀──HTTP 8443── tools ─────────────┘      │
+                         └─▶ PostgreSQL, Files, Objects                                                        │
+                       NAI / OpenAI-compatible endpoint ◀──HTTPS 443── model calls ────────────────────────────┘
+```
+
+The chat pods hold no database or Objects credentials and mount no share. They reach claims, photos and packets only through the API Service, so the stage 4 Flow policy stays as it is. Their one secret is the endpoint API key.
+
+| Ask | What happens |
+| :--- | :--- |
+| Which open claims look suspicious? | `fraud_scan`: the middleware scores every open claim with fixed rules and returns the signals; the model explains them |
+| Why is CLM-000123 flagged? | `fraud_check` and `related_claims`: the same score for one claim, and the claims that share its policy, contact or story |
+| Does the photo match the claim? | `describe_photo`: the photo is read from Files through the API, shrunk, and sent to the vision model. Its answer is labelled as an opinion and is not part of the score |
+| Was anything changed after approval? | `get_packet`: the WORM packet on Objects is compared with the row in PostgreSQL |
+| Draft a request for documents | `draft_text`: collects the facts; the model writes a draft to copy. Nothing is sent |
+
+**Fraud score.** Points per signal, capped at 100: the same photo file on another claim (40) or a near-identical photo (30), a photo taken before the loss date (25, from EXIF), other claims on the policy within 90 days (15 each, at most 30), the claimant's name or email on another policy (20), a nearly identical description (15), an amount far above its peers (15), an amount just under a round figure (10), a report more than 60 days after the loss (10), and an approved claim that no longer matches its packet (50). High is 50 or more, medium 25 to 49. The rules are in [`app/claimsdesk/fraud.py`](app/claimsdesk/fraud.py). The model quotes a score; it does not compute one. A signal is a reason to look, not proof.
+
+### What you provision
+
+| Item | Requirement |
+| :--- | :--- |
+| Stage 4 | The API pods, deployed by `update.sh --stage 4` with the kubeconfig on the portal |
+| Endpoint | OpenAI-compatible base URL (ending in `/v1`), an API key, a chat model with tool calls (`gpt-oss-120b`), and a model that accepts images (`gemma-4-26b-a4b`). NAI serves this API |
+| MetalLB | One more address, for the chat Service |
+| Flow | Portal VM to the chat LoadBalancer IP TCP 8443. NKP node IPs (or EgressIP) to the endpoint TCP 443 |
+| Image | The same image as stage 4, version 0.4.0 or later |
+
+### Run it
+
+```bash
+sudo ./update.sh --stage 5
+```
+
+It asks for the base URL, the two model names, and the API key (not echoed). TLS is verified unless `LLM_VERIFY_TLS=false`; the image trusts public CAs only. It checks the endpoint from the portal, warns if a model is missing, writes Secret `claims-desk-chat` from stdin, adds the chat pods to the same Helm release (the API pods keep their values), waits for their LoadBalancer IP, and requires `/health` to report both the API and the models. Then it points nginx `/chat/` at the pods and shows the panel.
+
+Unattended: add the stage 5 lines from [`claims-desk.conf.example`](claims-desk.conf.example) and give the key in the environment: `sudo LLM_API_KEY='…' ./update.sh --stage 5 --config claims-desk.conf -y`. The key is stored only in the Secret. Running `--stage 5` again selects the chat pods; `--reconfigure` asks for the settings and the key again. A stage 4 redeploy keeps the chat pods.
+
+For the demo, `sudo claims-desk seed-fraud` adds a few claims made to be found: two claimants sharing an email, a photo and a story; a repeat claim on the same policy whose photo does not show the loss; a photo taken a year before the loss; a late, very large travel claim; an ordinary control claim; and an approved claim whose amount is then changed in PostgreSQL behind the packet's back. That last step needs a database login from the portal, which the stage 4 Flow drop may block; the command then prints the UPDATE to run from a host that can.
+
+```bash
+sudo claims-desk status                               # includes the chat pods' health
+curl -sk https://<portal>/chat/health                 # models, API, tools
 ```
 
 ## Troubleshooting
@@ -320,6 +373,9 @@ sudo claims-desk logs 100   # portal services and both containers of every pod
 | `the pods cannot use PostgreSQL` | Add the node IPs to `pg_hba.conf` and reload PostgreSQL; allow TCP 5432/5000 from them. |
 | `no load balancer IP after 2 minutes` | MetalLB has no free address in its pool, or `STAGE4_LB_IP` is outside it. `kubectl -n claims describe svc claims-desk-api`. |
 | `cannot reach http://<ip>:8443` | Routing or firewall from the portal VM to the MetalLB address. |
+| **Assistant unavailable** in the panel | `curl -sk https://<portal>/chat/health`. `llm` unavailable: the nodes cannot reach the endpoint on 443, or the key is wrong. `model missing`: a model name the endpoint does not serve. `api` unavailable: the API pods are down |
+| The assistant answers without looking anything up | The chat model does not support tool calls. Use one that does (`gpt-oss-120b`), `--stage 5 --reconfigure` |
+| Photo descriptions are empty | The vision model does not accept images. Set `LLM_VISION_MODEL` to one that does |
 | Photo upload fails with permission denied at stage 4 | The pods' uid cannot write on the share. Rerun with `STAGE4_RUN_AS_UID` set to the uid that owns the files, `--reconfigure`. |
 
 ## Development

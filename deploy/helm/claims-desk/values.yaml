@@ -44,6 +44,29 @@ service:
   port: 8443
   loadBalancerIP: ""       # empty = MetalLB picks one from its pool
 
+# Stage 5: chat pods. update.sh --stage 5 turns them on. They call the API Service
+# inside the cluster and an OpenAI-compatible endpoint outside it. Their only secret
+# is key llm-api-key in Secret chat.existingSecret; no database or Objects keys.
+chat:
+  enabled: false
+  replicas: 2
+  existingSecret: claims-desk-chat
+  secretHash: ""
+  llm:
+    baseUrl: ""
+    model: gpt-oss-120b
+    visionModel: gemma-4-26b-a4b
+    verifyTls: true
+    timeout: 120
+  runAsUser: 10001
+  service:
+    type: LoadBalancer
+    port: 8443
+    loadBalancerIP: ""
+  resources:
+    requests: {cpu: 100m, memory: 160Mi}
+    limits: {memory: 512Mi}
+
 resources:
   api:
     requests: {cpu: 100m, memory: 128Mi}

@@ -46,7 +46,27 @@
   <div></div>
   <div class="branch">↓ docs container, same pod</div>
   <div></div><div></div>
-  {% if stage_number >= 5 %}
+  {% if stage_number >= 5 and chat_enabled %}
+  {% set crt = chat.runtime if chat and chat.runtime else {} %}
+  {% set cllm = chat.llm if chat and chat.llm else {} %}
+  <div class="hop {% if cllm.status != 'ok' %}down{% endif %}">
+    <span class="badge b-pod">NAI</span>
+    <b>NAI endpoint</b>
+    <code>{{ (cllm.base_url or 'unknown').split('://')[-1].split('/')[0] }}</code>
+    <code>{{ cllm.model or '?' }} · vision {{ cllm.vision_model or '?' }}</code>
+    {% if cllm.status != 'ok' %}<code>{{ cllm.error or 'unreachable' }}</code>{% endif %}
+  </div>
+  <div class="arrow"><small>HTTPS 443</small>←</div>
+  <div class="hop pod {% if not chat %}down{% endif %}">
+    <span class="badge b-pod">POD</span>
+    <b>Chat pods</b>
+    <code>{{ chat_url }}</code>
+    {% if chat %}
+      <code>{{ chat.host.hostname }} · {{ crt.pod_ip or chat.host.ip }}</code>
+      {% if crt.kind == 'pod' %}<code>node {{ crt.node or '?' }} · read-only tools via the API</code>{% endif %}
+    {% else %}<code>unreachable</code>{% endif %}
+  </div>
+  {% elif stage_number >= 5 %}
   <div class="hop planned">
     <span class="badge b-pod">NAI</span>
     <b>NAI endpoint</b>
@@ -195,5 +215,6 @@
   <li>The web tier never opens a database connection. Only the middleware does, so moving the middleware into pods later is a configuration change.</li>
   <li>From stage 3 the document VM writes the photo to Files when the claim is submitted, and the accepted packet to Objects when the claim is moved to <b>APPROVED</b>. The portal does not mount the share and does not hold the Objects keys.</li>
   <li>From stage 4 the API pods on NKP take both roles: the middleware container is the only database client, and the docs container in the same pod writes Files and Objects. The middleware on the portal VM is stopped. New claims show a pod name in <b>Written by</b>.</li>
+  <li>From stage 5 the chat pods answer questions on the main page. They call the NAI endpoint, and read claims, photos and packets only through the API pods: they hold no database or Objects credentials, and every tool is read-only. Fraud scores come from fixed rules in the middleware; the model explains them.</li>
 </ul>
 {% endblock %}

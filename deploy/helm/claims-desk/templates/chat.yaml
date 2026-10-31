@@ -1,0 +1,91 @@
+{{- if .Values.chat.enabled }}
+{{- $image := printf "%s:%s" .Values.image.repository (.Values.image.tag | default .Chart.AppVersion) -}}
+{{- $name := include "claims-desk.name" . -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}-chat
+  labels:
+    {{- include "claims-desk.labels" . | nindent 4 }}
+    app.kubernetes.io/component: chat
+spec:
+  replicas: {{ .Values.chat.replicas }}
+  selector:
+    matchLabels:
+      {{- include "claims-desk.chatSelector" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "claims-desk.labels" . | nindent 8 }}
+        app.kubernetes.io/component: chat
+        apptier: chat
+      annotations:
+        claims-desk/secret-hash: {{ .Values.chat.secretHash | quote }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: {{ .Values.chat.runAsUser }}
+        runAsGroup: {{ .Values.chat.runAsUser }}
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        # Read-only assistant. Reaches claims, photos and packets only through the API Service.
+        - name: chat
+          image: {{ $image }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: [uvicorn, claimsdesk.chat:app, --host, 0.0.0.0, --port, "8100", --no-server-header]
+          ports:
+            - {name: chat, containerPort: 8100}
+          env:
+            - {name: CLAIMS_STAGE, value: {{ .Values.stage | quote }}}
+            - {name: CLAIMS_CHAT_API_URL, value: {{ printf "http://%s-api.%s.svc:%v" $name .Release.Namespace .Values.service.port | quote }}}
+            - {name: CLAIMS_LLM_BASE_URL, value: {{ required "chat.llm.baseUrl is required" .Values.chat.llm.baseUrl | quote }}}
+            - {name: CLAIMS_LLM_MODEL, value: {{ .Values.chat.llm.model | quote }}}
+            - {name: CLAIMS_LLM_VISION_MODEL, value: {{ .Values.chat.llm.visionModel | quote }}}
+            - {name: CLAIMS_LLM_VERIFY_TLS, value: {{ .Values.chat.llm.verifyTls | quote }}}
+            - {name: CLAIMS_LLM_TIMEOUT, value: {{ .Values.chat.llm.timeout | quote }}}
+            - name: CLAIMS_LLM_API_KEY
+              valueFrom:
+                secretKeyRef: {name: {{ .Values.chat.existingSecret }}, key: llm-api-key}
+            {{- include "claims-desk.downward" . | nindent 12 }}
+          # /livez only: an LLM outage is reported in /health, not by dropping the pods.
+          readinessProbe:
+            httpGet: {path: /livez, port: chat}
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket: {port: chat}
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.chat.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}-chat
+  labels:
+    {{- include "claims-desk.labels" . | nindent 4 }}
+    app.kubernetes.io/component: chat
+  {{- with .Values.chat.service.loadBalancerIP }}
+  annotations:
+    metallb.universe.tf/loadBalancerIPs: {{ . | quote }}
+  {{- end }}
+spec:
+  type: {{ .Values.chat.service.type }}
+  selector:
+    {{- include "claims-desk.chatSelector" . | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.chat.service.port }}
+      targetPort: chat
+      protocol: TCP
+{{- end }}

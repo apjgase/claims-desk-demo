@@ -2,5 +2,5 @@ apiVersion: v2
 name: claims-desk
 description: Claims Desk stage 4. API pods take the middleware and document role on NKP.
 type: application
-version: 0.3.1
-appVersion: "0.3.1"
+version: 0.4.0
+appVersion: "0.4.0"

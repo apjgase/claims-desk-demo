@@ -65,7 +65,9 @@ def server_info(conn: psycopg.Connection) -> Dict[str, Any]:
     return dict(row)
 
 
-def list_claims(conn, status: Optional[str], q: Optional[str], limit: int):
+def list_claims(conn, status: Optional[str], q: Optional[str], limit: int,
+                loss_type: Optional[str] = None, text: Optional[str] = None,
+                loss_from=None, loss_to=None, amount_min=None, amount_max=None):
     where, args = [], []
     if status:
         where.append("status = %s")
@@ -73,6 +75,15 @@ def list_claims(conn, status: Optional[str], q: Optional[str], limit: int):
     if q:
         where.append("(claim_number ILIKE %s OR policy_number ILIKE %s OR claimant_name ILIKE %s)")
         args += ["%" + q + "%"] * 3
+    if text:
+        where.append("description ILIKE %s")
+        args.append("%" + text + "%")
+    for clause, value in (("loss_type = %s", loss_type), ("loss_date >= %s", loss_from),
+                          ("loss_date <= %s", loss_to), ("amount >= %s", amount_min),
+                          ("amount <= %s", amount_max)):
+        if value is not None:
+            where.append(clause)
+            args.append(value)
     query = "SELECT {} FROM claims {} ORDER BY id DESC LIMIT %s".format(
         CLAIM_COLUMNS, ("WHERE " + " AND ".join(where)) if where else ""
     )
@@ -127,4 +138,18 @@ def stats(conn) -> Dict[str, Any]:
     for r in rows:
         by_status[r["status"]] = {"count": r["n"], "amount": r["amount"]}
     total = sum(v["count"] for v in by_status.values())
-    return {"total": total, "by_status": by_status}
+    by_type = {t: {"count": 0, "amount": 0} for t in LOSS_TYPES}
+    for r in conn.execute("SELECT loss_type, count(*) AS n, coalesce(sum(amount), 0) AS amount "
+                          "FROM claims GROUP BY loss_type").fetchall():
+        by_type[r["loss_type"]] = {"count": r["n"], "amount": r["amount"]}
+    by_month = conn.execute(
+        "SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') AS month, count(*) AS count, "
+        "coalesce(sum(amount), 0) AS amount FROM claims "
+        "GROUP BY 1 ORDER BY 1 DESC LIMIT 12").fetchall()
+    return {"total": total, "by_status": by_status, "by_loss_type": by_type, "by_month": by_month}
+
+
+def all_claims(conn, limit: int = 5000):
+    """Every claim, newest first, for the fraud rules that compare claims with each other."""
+    return conn.execute("SELECT {} FROM claims ORDER BY id DESC LIMIT %s".format(CLAIM_COLUMNS),
+                        [limit]).fetchall()

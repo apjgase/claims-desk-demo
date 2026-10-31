@@ -6,7 +6,7 @@ holds the Objects keys.
 """
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import httpx
 
@@ -102,6 +102,31 @@ def get_photo(cfg: Dict[str, Any], claim_number: str) -> Tuple[bytes, str]:
         raise _error(response)
     media = response.headers.get("content-type", "application/octet-stream")
     return response.content, media.split(";")[0]
+
+
+def _get_json(cfg: Dict[str, Any], path: str) -> Optional[Dict[str, Any]]:
+    """GET from the document service. None on 404."""
+    try:
+        response = httpx.get(_url(cfg, path), timeout=cfg["docs_timeout"])
+    except httpx.HTTPError as exc:
+        raise DocsError("{} unreachable at {} ({})".format(
+            _tier(), cfg["docs_url"], type(exc).__name__)) from exc
+    if response.status_code == 404:
+        return None
+    if response.status_code >= 400:
+        raise _error(response)
+    return response.json()
+
+
+def photo_index(cfg: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    """Photo facts by claim number, read from the share by the document service."""
+    body = _get_json(cfg, "/v1/photos/index") or {}
+    return {p["claim_number"]: p for p in body.get("photos", [])}
+
+
+def get_packet(cfg: Dict[str, Any], claim_number: str) -> Optional[Dict[str, Any]]:
+    """The WORM packet from Objects, or None when it was never written."""
+    return _get_json(cfg, "/v1/packets/" + claim_number)
 
 
 def put_packet(cfg: Dict[str, Any], claim: Dict[str, Any]) -> str:

@@ -15,7 +15,7 @@ import httpx
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 
-from . import __version__, config, s3
+from . import __version__, config, photos, s3
 
 # 10 MB photos. The packet is the claim as JSON, far smaller.
 MAX_PHOTO = 10 * 1024 * 1024
@@ -108,6 +108,26 @@ async def put_photo(claim_number: str = Form(""), photo: UploadFile = File(...))
     return {"claim_number": claim_number, "photo_path": str(target), "bytes": len(blob)}
 
 
+@app.get("/v1/photos/index")
+def photo_index():
+    """One entry per claim folder with a photo: hashes and EXIF date, for the fraud checks."""
+    root = Path(_cfg()["nfs_mount"])
+    entries = []
+    if root.is_dir():
+        for directory in sorted(root.iterdir()):
+            if not (directory.is_dir() and _CLAIM.match(directory.name)):
+                continue
+            path = _find_photo(directory)
+            if path is None:
+                continue
+            try:
+                found = photos.file_facts(path)
+            except OSError:
+                continue
+            entries.append(dict(found, claim_number=directory.name, path=str(path)))
+    return {"mount": str(root), "count": len(entries), "photos": entries}
+
+
 @app.get("/v1/photos/{claim_number}")
 def get_photo(claim_number: str):
     claim_number = _claim_or_400(claim_number)
@@ -152,6 +172,25 @@ async def put_packet(payload: dict):
                 pass
         return JSONResponse(status_code=502, content={"detail": str(exc)})
     return {"claim_number": claim_number, "packet_url": url, "already_stored": already}
+
+
+@app.get("/v1/packets/{claim_number}")
+def get_packet(claim_number: str):
+    claim_number = _claim_or_400(claim_number)
+    key = "{}/packet.json".format(claim_number)
+    try:
+        with s3.client_from(_cfg()) as client:
+            body = client.get_object(key)
+            url = client.object_url(key)
+    except (s3.S3Error, httpx.HTTPError) as exc:
+        return JSONResponse(status_code=502, content={"detail": str(exc)[:300]})
+    if body is None:
+        raise HTTPException(status_code=404, detail="packet not found")
+    try:
+        document = json.loads(body)
+    except ValueError:
+        return JSONResponse(status_code=502, content={"detail": "packet is not JSON"})
+    return {"claim_number": claim_number, "packet_url": url, "packet": document}
 
 
 def install_check() -> None:
