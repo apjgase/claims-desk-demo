@@ -1277,6 +1277,15 @@ d=json.load(open(sys.argv[1]))
 raise SystemExit(0 if str(d.get("docs_url") or "").strip() else 1)' "$ETC/api.json"
 }
 
+# Version reported by the document VM, or nothing when it does not answer.
+docs_vm_version() {
+  local url
+  url="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("docs_url") or "")' "$ETC/api.json" 2>/dev/null)"
+  [ -n "$url" ] || return 0
+  curl -fsS --max-time 5 "${url%/}/health" 2>/dev/null \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin).get("version") or "")' 2>/dev/null || true
+}
+
 saved_pod_url() {
   [ -f "$ETC/web.json" ] || return 0
   python3 -c 'import json,sys
@@ -1446,9 +1455,23 @@ case "$STAGE" in
       exit 0
     fi
     if docs_configured && [ "$RECONFIGURE" -eq 0 ]; then
-      run_portal_install quiet
-      apply_stage 3
-      info "document VM left as it is."
+      have="$(docs_vm_version)"
+      want="$(bundle_version)"
+      if [ -n "$have" ] && [ "$have" != "$want" ] && [ -f "$SECRET" ]; then
+        info "document VM runs ${have}; this bundle is ${want}. Upgrading it with the settings in ${SECRET}."
+        portal_stage3
+        apply_stage 3
+      else
+        run_portal_install quiet
+        apply_stage 3
+        if [ -z "$have" ]; then
+          warn "document VM did not answer /health; left as it is"
+        elif [ "$have" != "$want" ]; then
+          warn "document VM runs ${have}, this bundle is ${want}, and ${SECRET} is missing: sudo $0 --stage 3 --reconfigure"
+        else
+          info "document VM ${have} left as it is."
+        fi
+      fi
     else
       portal_stage3
     fi

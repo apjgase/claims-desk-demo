@@ -241,3 +241,25 @@ def test_apply_stage_switches_4_5_4(apply_stage):
 
     run.nginx_conf.write_text(re.sub(r"upstream claims_chat \{[^}]*\}", "", run.nginx_conf.read_text()))
     assert "no /chat/ location" in run(5, ok=False)
+
+
+@needs_gnu
+def test_apply_stage_cycle_2_3_4_5_2_5_3(apply_stage):
+    run = apply_stage
+    pods, chat = "http://10.10.120.150:8443", "http://10.10.120.151:8443"
+    first = {4: (pods, ""), 5: ("", chat)}
+    for stage in (2, 3, 4, 5, 2, 5, 3):
+        web, conf, sysd = run(stage, *first.pop(stage, ("", "")))
+        api = json.loads((run.etc / "api.json").read_text())
+        assert web["stage"] == api["stage"] == stage
+        assert (run.etc / "stage").read_text().strip() == str(stage)
+        assert api["docs_url"] == "http://10.1.1.8:8090", "the document VM setting survives every switch"
+        on_pods = stage >= 4
+        assert web["api_url"] == (pods if on_pods else "http://127.0.0.1:8000"), stage
+        assert "upstream claims_api { server " + ("10.10.120.150:8443" if on_pods else "127.0.0.1:8000") in conf
+        assert "upstream claims_chat { server " + ("10.10.120.151:8443" if stage == 5 else "127.0.0.1:8100") in conf
+        assert ("disable -q --now claims-api" in sysd) == on_pods, stage
+        assert ("restart claims-api claims-web" in sysd) == (not on_pods), stage
+        if stage >= 4:
+            assert web.get("chat_url") == chat or (stage == 4 and "chat_url" not in web)
+        assert conf.count("upstream claims_api") == conf.count("upstream claims_chat") == 1
